@@ -1,66 +1,104 @@
-# Destow App
+# Destow Mobile App
 
-Destow is a travel agency discovery platform where users can search and compare travel agencies based on **destination, travel dates, and availability**. The platform focuses on providing a **simple and clean interface** to help users find agencies offering travel services without complex map interfaces.
+Destow is a **travel agency discovery mobile application** where users can search and compare travel agencies based on **destination, travel dates, and availability**.
+
+The mobile app provides a **simple, fast, and intuitive interface** that helps users discover travel agencies and travel packages without complicated map-based navigation.
 
 ---
 
-## Overview
+# Overview
 
-Destow allows users to:
+The **Destow Mobile App** allows users to:
 
 * Search travel agencies by **From / To location**
 * Select **travel dates**
-* View available **travel agencies**
-* Compare agencies based on services offered
-* Easily contact or book through agencies
+* View **available travel agencies**
+* Compare agencies based on services
+* View agency details and packages
+* Contact agencies directly
 
-The application focuses primarily on **UI simplicity and performance**.
+The application focuses on **simplicity, performance, and mobile-friendly UI**.
 
 ---
 
-## Tech Stack
+# Tech Stack
 
-### Frontend
+## Mobile Application
 
-* React.js
-* TailwindCSS / CSS
-* Axios (for API calls)
+* React Native
+* Expo / React Native CLI
+* JavaScript / TypeScript
+* Axios (API communication)
 
-### Backend (Optional / Future Integration)
+## Backend (Planned / Future Integration)
 
 * Node.js
 * Express.js
+* PostgreSQL / MongoDB
+* Authentication (Cognito / Keycloak)
+* Authorization using Cerbos
 
-### Other Tools
+## DevOps & Tools
 
-* Git & GitHub
-* NPM / Yarn
+* Git
+* GitHub
+* Docker
+* CI/CD pipelines
 
 ---
 
-## Project Structure
+# Mobile Application Architecture
 
 ```
-destow/
+Mobile App (React Native)
+        │
+        │ HTTPS API Calls
+        ▼
+Backend API (Node.js / Express)
+        │
+        ├── Authentication Service
+        │
+        ├── Authorization Layer (Cerbos)
+        │
+        ├── Database (PostgreSQL / MongoDB)
+        │
+        └── Notification Service (Push Notifications)
+```
+
+---
+
+# Project Structure
+
+```
+destow-mobile/
 │
-├── public/
+├── assets/
+│   ├── images
+│   └── icons
 │
 ├── src/
+│
 │   ├── components/
-│   │   ├── Navbar
-│   │   ├── SearchForm
 │   │   ├── AgencyCard
-│   │   └── Footer
+│   │   ├── SearchForm
+│   │   ├── Header
+│   │   └── Button
 │   │
-│   ├── pages/
-│   │   ├── Home
-│   │   ├── SearchResults
-│   │   └── AgencyDetails
+│   ├── screens/
+│   │   ├── HomeScreen
+│   │   ├── SearchResultsScreen
+│   │   ├── AgencyDetailsScreen
+│   │   └── ContactScreen
 │   │
-│   ├── assets/
+│   ├── navigation/
+│   │   └── AppNavigator
 │   │
-│   ├── App.js
-│   └── index.js
+│   ├── services/
+│   │   └── apiService
+│   │
+│   ├── utils/
+│   │
+│   └── App.js
 │
 ├── package.json
 └── README.md
@@ -70,21 +108,21 @@ destow/
 
 # Setup Instructions
 
-## 1. Clone the Repository
+## 1 Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/destow.git
+git clone https://github.com/your-username/destow-mobile.git
 ```
 
 Navigate to the project directory:
 
 ```bash
-cd destow
+cd destow-mobile
 ```
 
 ---
 
-## 2. Install Dependencies
+# 2 Install Dependencies
 
 Using npm:
 
@@ -100,7 +138,7 @@ yarn install
 
 ---
 
-## 3. Run the Application
+# 3 Run the Application
 
 Start the development server:
 
@@ -108,93 +146,103 @@ Start the development server:
 npm start
 ```
 
-The app will run at:
+Run on Android:
 
+```bash
+npm run android
 ```
-http://localhost:3000
-```
 
----
+Run on iOS:
 
-# UI Development
-
-The UI is designed to be **simple, responsive, and agency-focused**.
-
-## Core UI Components
-
-### 1. Navbar
-
-Contains:
-
-* App logo
-* Navigation links
-* Login / Signup (optional)
-
----
-
-### 2. Search Section
-
-Main search interface containing:
-
-* **From Location**
-* **Destination**
-* **Travel Dates**
-* **Search Button**
-
-Example Layout:
-
-```
---------------------------------
-| From | To | Dates | Search   |
---------------------------------
+```bash
+npm run ios
 ```
 
 ---
 
-### 3. Agency Listing
+# Mobile UI Flow
 
-Displays travel agencies in a **card format**.
+## 1 Home Screen
 
-Each card contains:
+Main screen of the application.
+
+Features:
+
+* Destination search
+* Travel date selection
+* Search button
+
+Example layout:
+
+```
+------------------------
+From Location
+Destination
+Travel Date
+[ Search ]
+------------------------
+```
+
+---
+
+# 2 Search Results Screen
+
+Displays travel agencies based on search criteria.
+
+Each agency card contains:
 
 * Agency name
-* Destination covered
+* Destination
+* Rating
 * Price range
-* Ratings
 * View details button
 
-Example Card:
+Example:
 
 ```
----------------------------
-| Agency Name             |
-| Destination: Manali     |
-| Rating: ⭐⭐⭐⭐           |
-| Price: ₹8000 onwards    |
-| [View Details]          |
----------------------------
+-------------------------
+Agency Name
+Destination: Manali
+Rating: ⭐⭐⭐⭐
+Price: ₹8000 onwards
+[View Details]
+-------------------------
 ```
 
 ---
 
-### 4. Agency Details Page
+# 3 Agency Details Screen
 
-Displays:
+Displays detailed information about the selected agency.
+
+Includes:
 
 * Agency description
-* Package details
-* Travel schedule
-* Contact / booking option
+* Travel packages
+* Price details
+* Contact option
+
+---
+
+# 4 Contact / Booking Screen
+
+Allows users to:
+
+* Contact travel agencies
+* Send booking inquiry
+* View agency contact details
 
 ---
 
 # UI Design Principles
 
-* Minimal design
-* Mobile responsive
-* Clear typography
-* Fast loading components
-* Card-based layout
+The application focuses on:
+
+* Simple navigation
+* Mobile-friendly layout
+* Fast loading screens
+* Clean UI components
+* Card-based design for agencies
 
 ---
 
@@ -207,46 +255,46 @@ Planned improvements:
 * Booking system
 * Reviews and ratings
 * Payment integration
-* Filters (budget, duration, rating)
+* Advanced search filters
+* Push notifications
 * Admin panel
 
 ---
 
 # Development Workflow
 
-1. Create a feature branch
+Create a feature branch:
 
 ```bash
-git checkout -b feature/ui-improvements
+git checkout -b feature/mobile-ui
 ```
 
-2. Commit changes
+Commit changes:
 
 ```bash
-git commit -m "Added agency card UI"
+git commit -m "Added agency card component"
 ```
 
-3. Push branch
+Push branch:
 
 ```bash
-git push origin feature/ui-improvements
+git push origin feature/mobile-ui
 ```
 
-4. Create Pull Request
+Create a Pull Request on GitHub.
 
 ---
 
 # Screens to Implement
 
-* Home Page
-* Search Results Page
-* Agency Details Page
-* Contact Page
+* Home Screen
+* Search Results Screen
+* Agency Details Screen
+* Contact Screen
+* Login / Signup Screen (Future)
 
 ---
 
 # Contributors
 
-* Destow Development Team
-
----
+Destow Development Team
