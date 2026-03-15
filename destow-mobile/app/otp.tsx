@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, Image, ScrollView } from 'react-native';
 import { router } from 'expo-router';
+import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
+
 
 export default function OtpScreen() {
   const [otp, setOtp] = useState('');
@@ -20,39 +22,47 @@ export default function OtpScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.topMapContainer}>
-        {/* Placeholder for the world map image at the top */}
-        <View style={styles.mapPlaceholder}>
-          <Text style={{fontSize: 80, opacity: 0.1}}>🗺️</Text>
-        </View>
-      </View>
-
-      <View style={styles.contentContainer}>
-        <View style={styles.logoContainer}>
-          <View style={styles.logoSquare}>
-            <Text style={styles.logoText}>Destow</Text>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+        <View style={styles.topMapContainer} pointerEvents="none">
+          <View style={styles.mapPlaceholder}>
+            <Image 
+              source={require('../assets/images/background.png')} 
+              style={styles.watermarkImage}
+              resizeMode="cover"
+            />
           </View>
         </View>
 
-        <Text style={styles.title}>OTP</Text>
+        <View style={styles.contentContainer}>
+          <View style={styles.logoContainer}>
+              <Image 
+              source={require('../assets/images/icon.png')} 
+              style={{width: 80, height: 80,}}
+              resizeMode="contain"
+            />
+          </View>
 
-        <View style={styles.formContainer}>
-          <TextInput 
-            style={styles.input}
-            placeholder="Enter OTP"
-            placeholderTextColor="#888"
-            value={otp}
-            onChangeText={setOtp}
-            keyboardType="number-pad"
-            maxLength={6}
-            textAlign="center"
-          />
+          <Text style={styles.title}>OTP</Text>
 
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>LOGIN</Text>
-          </TouchableOpacity>
+          <View style={styles.formContainer}>
+            <TextInput 
+              style={styles.input}
+              placeholder="Enter OTP"
+              placeholderTextColor={AppColors.placeholder}
+              value={otp}
+              onChangeText={setOtp}
+              keyboardType="number-pad"
+              maxLength={6}
+              textAlign="center"
+              secureTextEntry={true}
+            />
+
+            <TouchableOpacity style={styles.button} onPress={handleLogin}>
+              <Text style={styles.buttonText}>LOGIN</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -60,80 +70,74 @@ export default function OtpScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: AppColors.background,
   },
   topMapContainer: {
     height: '35%',
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: AppColors.background,
     overflow: 'hidden',
   },
   mapPlaceholder: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#E6EFF4',
+    backgroundColor: AppColors.accentLight,
     alignItems: 'center',
     justifyContent: 'center',
     borderBottomLeftRadius: 50,
     borderBottomRightRadius: 50,
+    overflow: 'hidden',
+  },
+  watermarkImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.15,
   },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: 30,
+    paddingHorizontal: Spacing.xl,
     marginTop: -40,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: Spacing.xl,
   },
   logoSquare: {
     width: 80,
     height: 80,
-    backgroundColor: '#1A1D20',
-    borderRadius: 20,
+    backgroundColor: AppColors.brand,
+    borderRadius: Radii.logo,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 5,
+    ...Shadows.card,
   },
   logoText: {
-    color: '#fff',
+    color: AppColors.background,
     fontWeight: 'bold',
     fontSize: 18,
     fontStyle: 'italic',
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
+    ...Typography.screenTitle,
     textAlign: 'center',
-    color: '#8A8D91',
-    marginTop: 10,
-    marginBottom: 20,
+    color: AppColors.textMuted,
+    marginBottom: Spacing.lg,
     letterSpacing: 2,
   },
   formContainer: {
     width: '100%',
   },
   input: {
-    backgroundColor: '#D9D9D9',
-    borderRadius: 12,
-    padding: 18,
-    fontSize: 18,
-    marginBottom: 40,
-    color: '#333',
-    fontWeight: '600',
+    ...CommonStyles.input,
+    fontSize: 24,
+    marginBottom: Spacing.xl,
+    fontWeight: '700',
+    backgroundColor: AppColors.inputBg,
   },
   button: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    padding: 18,
-    alignItems: 'center',
+    ...CommonStyles.primaryButton,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.buttonText,
+    color: AppColors.background,
   },
 });

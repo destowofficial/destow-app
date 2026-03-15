@@ -1,7 +1,8 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 
 export default function CabListingScreen() {
   const handleBack = () => {
@@ -19,7 +20,7 @@ export default function CabListingScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Feather name="corner-up-left" size={28} color="black" />
+          <Feather name="corner-up-left" size={28} color={AppColors.brand} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>NEW DELHI - CHANDIGARH</Text>
       </View>
@@ -44,12 +45,12 @@ export default function CabListingScreen() {
               <Text style={styles.carDesc}>4 Seater A/C Cab</Text>
               
               <View style={styles.featureRow}>
-                <MaterialCommunityIcons name="account-tie-hat" size={20} color="black" />
+                <MaterialCommunityIcons name="account-tie-hat" size={20} color={AppColors.brand} />
                 <Text style={styles.featureText}>DRIVER INCLUDED</Text>
               </View>
               
               <View style={styles.featureRow}>
-                <MaterialCommunityIcons name="speedometer" size={20} color="black" />
+                <MaterialCommunityIcons name="speedometer" size={20} color={AppColors.brand} />
                 <Text style={styles.featureText}>13Rs/KM</Text>
               </View>
             </View>
@@ -74,12 +75,12 @@ export default function CabListingScreen() {
               <Text style={styles.carDesc}>7 Seater A/C Cab</Text>
               
               <View style={styles.featureRow}>
-                <MaterialCommunityIcons name="account-tie-hat" size={20} color="black" />
+                <MaterialCommunityIcons name="account-tie-hat" size={20} color={AppColors.brand} />
                 <Text style={styles.featureText}>DRIVER INCLUDED</Text>
               </View>
               
               <View style={styles.featureRow}>
-                <MaterialCommunityIcons name="speedometer" size={20} color="black" />
+                <MaterialCommunityIcons name="speedometer" size={20} color={AppColors.brand} />
                 <Text style={styles.featureText}>20Rs/KM</Text>
               </View>
             </View>
@@ -103,104 +104,99 @@ export default function CabListingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: AppColors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: AppColors.border,
   },
   backButton: {
-    marginRight: 15,
+    marginRight: Spacing.md,
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#000',
+    ...Typography.sectionHeading,
   },
   scrollContainer: {
-    padding: 15,
-    paddingBottom: 40,
+    padding: Spacing.md,
+    paddingBottom: Spacing.xxl,
   },
   detailsBlock: {
-    backgroundColor: '#D1E8F5',
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: AppColors.cardBgLight,
+    borderRadius: Radii.card,
+    padding: Spacing.lg,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: Spacing.lg,
+    ...Shadows.subtle,
   },
   detailsTextCol: {
     flex: 1,
   },
   detailsTitle: {
-    fontSize: 16,
+    ...Typography.body,
     fontWeight: '900',
-    color: '#000',
-    marginBottom: 4,
+    marginBottom: Spacing.xs,
   },
   detailsSub: {
-    fontSize: 12,
+    ...Typography.caption,
     fontWeight: '600',
-    color: '#000',
+    color: AppColors.brand,
   },
   modifyButton: {
-    backgroundColor: '#B1CCDB',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-    marginLeft: 10,
+    backgroundColor: AppColors.accentButton,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: Radii.chip,
+    marginLeft: Spacing.sm,
+    ...Shadows.subtle,
   },
   modifyButtonText: {
     fontSize: 10,
     fontWeight: '800',
-    color: '#000',
+    color: AppColors.brand,
   },
   card: {
-    backgroundColor: '#A0D2E7',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
+    backgroundColor: AppColors.cardBg,
+    borderRadius: Radii.card,
+    padding: Spacing.lg,
+    marginBottom: Spacing.lg,
+    ...Shadows.card,
   },
   agencyName: {
+    ...Typography.sectionHeading,
     textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#000',
-    marginBottom: 15,
+    marginBottom: Spacing.md,
   },
   cardContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: Spacing.lg,
   },
   infoCol: {
     flex: 1,
   },
   carType: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#000',
+    ...Typography.sectionHeading,
   },
   carDesc: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 15,
+    ...Typography.body,
+    marginBottom: Spacing.md,
   },
   featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: Spacing.sm,
   },
   featureText: {
-    marginLeft: 10,
-    fontSize: 12,
+    marginLeft: Spacing.sm,
+    ...Typography.caption,
     fontWeight: '600',
-    color: '#000',
+    color: AppColors.brand,
   },
   imageCol: {
     width: 120,
@@ -209,15 +205,16 @@ const styles = StyleSheet.create({
   },
   bookButton: {
     backgroundColor: '#86AABF',
-    borderRadius: 20,
-    paddingVertical: 12,
+    borderRadius: Radii.button,
+    paddingVertical: Spacing.sm + 4,
     alignItems: 'center',
     alignSelf: 'center',
     width: '60%',
+    ...Shadows.button,
   },
   bookButtonText: {
     fontSize: 18,
     fontWeight: '900',
-    color: '#000',
+    color: AppColors.brand,
   },
 });

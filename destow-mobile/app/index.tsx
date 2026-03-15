@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image, KeyboardAvoidingView, Platform, Alert, ScrollView } from 'react-native';
 import { router } from 'expo-router';
+import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
@@ -21,50 +22,57 @@ export default function LoginScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={styles.topMapContainer}>
-        {/* Placeholder for the world map image at the top */}
-        <View style={styles.mapPlaceholder}>
-          <Text style={{fontSize: 80, opacity: 0.1}}>🗺️</Text>
-        </View>
-      </View>
-
-      <View style={styles.contentContainer}>
-        <View style={styles.logoContainer}>
-          <View style={styles.logoSquare}>
-            <Text style={styles.logoText}>Destow</Text>
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+        <View style={styles.topMapContainer} pointerEvents="none">
+          <View style={styles.mapPlaceholder}>
+            <Image 
+              source={require('../assets/images/background.png')} 
+              style={styles.watermarkImage}
+              resizeMode="cover"
+            />
           </View>
         </View>
 
-        <Text style={styles.title}>Login</Text>
-        <Text style={styles.subtitle}>Sign in to continue.</Text>
+        <View style={styles.contentContainer}>
+                  <View style={styles.logoContainer}>
+            <Image 
+              source={require('../assets/images/icon.png')} 
+              style={{width: 80, height: 80,}}
+              resizeMode="contain"
+            />
+          </View>
 
-        <View style={styles.formContainer}>
-          <Text style={styles.label}>NAME</Text>
-          <TextInput 
-            style={styles.input}
-            placeholder="Jiara Martins"
-            placeholderTextColor="#888"
-            value={name}
-            onChangeText={setName}
-            autoCapitalize="words"
-          />
+          <Text style={styles.title}>Login</Text>
+          <Text style={styles.subtitle}>Sign in to continue.</Text>
 
-          <Text style={styles.label}>PHONE NUMBER</Text>
-          <TextInput 
-            style={styles.input}
-            placeholder="******"
-            placeholderTextColor="#888"
-            value={phone}
-            onChangeText={setPhone}
-            keyboardType="phone-pad"
-            maxLength={15}
-          />
+          <View style={styles.formContainer}>
+            <Text style={styles.label}>NAME</Text>
+            <TextInput 
+              style={styles.input}
+              placeholder="Jiara Martins"
+              placeholderTextColor={AppColors.placeholder}
+              value={name}
+              onChangeText={setName}
+              autoCapitalize="words"
+            />
 
-          <TouchableOpacity style={styles.button} onPress={handleSendOTP}>
-            <Text style={styles.buttonText}>Send OTP</Text>
-          </TouchableOpacity>
+            <Text style={styles.label}>PHONE NUMBER</Text>
+            <TextInput 
+              style={styles.input}
+              placeholder="******"
+              placeholderTextColor={AppColors.placeholder}
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              maxLength={15}
+            />
+
+            <TouchableOpacity style={styles.button} onPress={handleSendOTP}>
+              <Text style={styles.buttonText}>Send OTP</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
@@ -72,92 +80,82 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: AppColors.background,
   },
   topMapContainer: {
     height: '35%',
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: AppColors.background,
     overflow: 'hidden',
   },
   mapPlaceholder: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#E6EFF4',
+    backgroundColor: AppColors.accentLight,
     alignItems: 'center',
     justifyContent: 'center',
     borderBottomLeftRadius: 50,
     borderBottomRightRadius: 50,
+    overflow: 'hidden',
+  },
+  watermarkImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.15,
+    backgroundColor: AppColors.brand,
   },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: 30,
+    paddingHorizontal: Spacing.xl,
     marginTop: -40, // overlap with the map
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: Spacing.lg,
   },
   logoSquare: {
     width: 80,
     height: 80,
-    backgroundColor: '#1A1D20',
-    borderRadius: 20,
+    backgroundColor: AppColors.brand,
+    borderRadius: Radii.logo,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 5,
+    ...Shadows.card,
   },
   logoText: {
-    color: '#fff',
+    color: AppColors.background,
     fontWeight: 'bold',
     fontSize: 18,
     fontStyle: 'italic',
   },
   title: {
-    fontSize: 36,
-    fontWeight: '800',
+    ...Typography.screenTitle,
     textAlign: 'center',
-    color: '#1A1D20',
-    marginTop: 10,
+    marginTop: Spacing.sm,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#8A8D91',
+    ...Typography.body,
+    color: AppColors.textMuted,
     textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 40,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xl,
   },
   formContainer: {
     width: '100%',
   },
   label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#8A8D91',
-    marginBottom: 8,
-    letterSpacing: 1,
+    ...Typography.label,
+    marginBottom: Spacing.sm,
   },
   input: {
-    backgroundColor: '#D9D9D9',
-    borderRadius: 12,
-    padding: 18,
-    fontSize: 16,
-    marginBottom: 24,
-    color: '#333',
+    ...CommonStyles.input,
+    marginBottom: Spacing.lg,
   },
   button: {
-    backgroundColor: '#1E1E1E',
-    borderRadius: 12,
-    padding: 18,
-    alignItems: 'center',
-    marginTop: 10,
+    ...CommonStyles.primaryButton,
+    marginTop: Spacing.sm,
   },
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    ...Typography.buttonText,
+    color: AppColors.background,
   },
 });
