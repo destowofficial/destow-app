@@ -44,11 +44,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="support"
+        name="chat"
         options={{
-          title: 'Support',
+          title: 'Chat',
           tabBarIcon: ({ color }) => (
-            <Feather name="headphones" size={24} color={color} />
+            <Feather name="message-square" size={24} color={color} />
           ),
         }}
       />

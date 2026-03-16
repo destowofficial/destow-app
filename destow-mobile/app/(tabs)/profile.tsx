@@ -1,54 +1,70 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { AppColors, Spacing, Typography, Radii, Shadows, CommonStyles } from '../../constants/design-tokens';
+import { router } from 'expo-router';
+import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
 
 export default function ProfileScreen() {
+  const handleLogout = () => {
+    // In a real app, clear auth state here
+    router.replace('/');
+  };
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.headerCard}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <Text style={styles.headerTitle}>Profile</Text>
+
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        {/* Profile Info Card */}
+        <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
-            <Feather name="user" size={48} color={AppColors.background} />
+            <Feather name="user" size={40} color={AppColors.background} />
           </View>
-          <Text style={styles.name}>Jiara Martins</Text>
-          <Text style={styles.phone}>+91 9876543210</Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>Premium Member</Text>
+          <Text style={styles.userName}>Rahul Sharma</Text>
+          <View style={styles.phoneContainer}>
+            <Feather name="phone-call" size={14} color={AppColors.background} />
+            <Text style={styles.userPhone}>+91 9876543210</Text>
           </View>
         </View>
 
-        <View style={styles.menuGroup}>
-          <Text style={styles.sectionTitle}>Account Setup</Text>
+        {/* Action Menu List */}
+        <View style={styles.menuContainer}>
+          <TouchableOpacity style={styles.menuItem}>
+            <View style={styles.menuIconContainer}>
+              <MaterialCommunityIcons name="shield-check-outline" size={20} color={AppColors.brand} />
+            </View>
+            <Text style={styles.menuText}>Safety & Security</Text>
+            <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
+          </TouchableOpacity>
           
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Feather name="edit-2" size={20} color={AppColors.brand} />
-              <Text style={styles.menuItemText}>Edit Profile</Text>
-            </View>
-            <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
-          </TouchableOpacity>
+          <View style={styles.divider} />
 
           <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Feather name="map-pin" size={20} color={AppColors.brand} />
-              <Text style={styles.menuItemText}>Saved Addresses</Text>
+            <View style={styles.menuIconContainer}>
+              <Feather name="help-circle" size={20} color={AppColors.brand} />
             </View>
+            <Text style={styles.menuText}>Help & Support</Text>
             <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
           </TouchableOpacity>
+          
+          <View style={styles.divider} />
 
           <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Feather name="credit-card" size={20} color={AppColors.brand} />
-              <Text style={styles.menuItemText}>Payment Methods</Text>
+            <View style={styles.menuIconContainer}>
+              <Feather name="settings" size={20} color={AppColors.brand} />
             </View>
+            <Text style={styles.menuText}>Settings</Text>
             <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.logoutButton}>
-          <Text style={styles.logoutButtonText}>Log Out</Text>
+        {/* Logout Button */}
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Feather name="log-out" size={20} color={AppColors.background} style={styles.logoutIcon} />
+          <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
+
+        <Text style={styles.versionText}>Destow v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -59,12 +75,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppColors.background,
   },
-  content: {
-    flexGrow: 1,
-    padding: Spacing.xl,
+  headerTitle: {
+    ...Typography.screenTitle,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+    paddingBottom: Spacing.lg,
+    fontSize: 28,
   },
-  headerCard: {
-    backgroundColor: AppColors.cardBg,
+  scrollContainer: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.xl,
+  },
+  profileCard: {
+    backgroundColor: AppColors.brand,
     borderRadius: Radii.card,
     padding: Spacing.xl,
     alignItems: 'center',
@@ -75,66 +98,79 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: AppColors.brand,
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: Spacing.md,
-    ...Shadows.button,
   },
-  name: {
-    ...Typography.screenTitle,
+  userName: {
     fontSize: 24,
+    fontWeight: '800',
+    color: AppColors.background,
     marginBottom: Spacing.xs,
   },
-  phone: {
-    ...Typography.body,
-    color: AppColors.brand,
-    opacity: 0.8,
-    marginBottom: Spacing.md,
-    fontWeight: '600',
+  phoneContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  badge: {
+  userPhone: {
+    fontSize: 16,
+    color: AppColors.background,
+    marginLeft: Spacing.sm,
+    opacity: 0.9,
+  },
+  menuContainer: {
     backgroundColor: AppColors.cardBgLight,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radii.chip,
-  },
-  badgeText: {
-    ...Typography.caption,
-    color: AppColors.brand,
-    fontWeight: '700',
-  },
-  sectionTitle: {
-    ...Typography.label,
-    marginBottom: Spacing.md,
-  },
-  menuGroup: {
+    borderRadius: Radii.card,
     marginBottom: Spacing.xl,
+    overflow: 'hidden',
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: AppColors.border,
+    padding: Spacing.lg,
   },
-  menuItemLeft: {
-    flexDirection: 'row',
+  menuIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: AppColors.accent,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
   },
-  menuItemText: {
-    ...Typography.body,
+  menuText: {
+    flex: 1,
+    fontSize: 16,
     fontWeight: '600',
-    marginLeft: Spacing.md,
+    color: AppColors.brand,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: AppColors.border,
+    marginLeft: 70, // Align with text
   },
   logoutButton: {
     ...CommonStyles.primaryButton,
-    backgroundColor: AppColors.inputBg,
-    marginTop: 'auto',
+    backgroundColor: AppColors.error,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: AppColors.error,
   },
-  logoutButtonText: {
+  logoutIcon: {
+    marginRight: Spacing.sm,
+  },
+  logoutText: {
     ...Typography.buttonText,
-    color: '#D32F2F', // Red for logout
+    color: AppColors.background,
+    fontSize: 18,
+  },
+  versionText: {
+    textAlign: 'center',
+    color: AppColors.textMuted,
+    fontSize: 14,
+    marginTop: Spacing.xl,
   },
 });

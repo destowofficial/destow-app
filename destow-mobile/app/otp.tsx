@@ -1,17 +1,19 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, Alert, Image, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
 import { router } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
-
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function OtpScreen() {
   const [otp, setOtp] = useState('');
+  const [error, setError] = useState('');
 
   const handleLogin = () => {
-    if (!otp.trim()) {
-      Alert.alert('Error', 'Please enter the OTP.');
+    if (otp.length !== 6) {
+      setError('Please enter a valid 6-digit OTP.');
       return;
     }
+    setError('');
     console.log('Verifying OTP', otp);
     // On success, go to home/tabs
     router.replace('/(tabs)');
@@ -22,43 +24,49 @@ export default function OtpScreen() {
       style={styles.container} 
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-        <View style={styles.topMapContainer} pointerEvents="none">
-          <View style={styles.mapPlaceholder}>
-            <Image 
-              source={require('../assets/images/background.png')} 
-              style={styles.watermarkImage}
-              resizeMode="cover"
-            />
-          </View>
-        </View>
-
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
+        
         <View style={styles.contentContainer}>
-          <View style={styles.logoContainer}>
-              <Image 
-              source={require('../assets/images/icon.png')} 
-              style={{width: 80, height: 80,}}
-              resizeMode="contain"
-            />
+          <View style={styles.header}>
+            <View style={styles.logoOuter}>
+              <View style={styles.logoInner}>
+                <Image 
+                  source={require('../assets/images/icon.png')} 
+                  style={{width: 50, height: 50}}
+                  resizeMode="contain"
+                />
+              </View>
+            </View>
+            
+            <Text style={styles.title}>Welcome to Destow</Text>
+            <Text style={styles.subtitle}>Your intercity travel, simplified.</Text>
           </View>
-
-          <Text style={styles.title}>OTP</Text>
 
           <View style={styles.formContainer}>
-            <TextInput 
-              style={styles.input}
-              placeholder="Enter OTP"
-              placeholderTextColor={AppColors.placeholder}
-              value={otp}
-              onChangeText={setOtp}
-              keyboardType="number-pad"
-              maxLength={6}
-              textAlign="center"
-              secureTextEntry={true}
-            />
+            <Text style={styles.phoneInfo}>Code sent to <Text style={{fontWeight: '700', color: AppColors.brand}}>+91 7842277204</Text></Text>
+            <TouchableOpacity onPress={() => router.back()} style={styles.changeNumberBtn}>
+               <Text style={styles.changeNumberText}>Change Number</Text>
+            </TouchableOpacity>
+
+            <View style={styles.inputWrapper}>
+              <MaterialCommunityIcons name="shield-check-outline" size={24} color={AppColors.textMuted} style={styles.inputIcon} />
+              <TextInput 
+                style={styles.input}
+                placeholder="E n t e r   6 - d i g i t"
+                placeholderTextColor={AppColors.textMuted}
+                value={otp}
+                onChangeText={setOtp}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+            </View>
+
+            {!!error && (
+              <Text style={styles.errorText}>{error}</Text>
+            )}
 
             <TouchableOpacity style={styles.button} onPress={handleLogin}>
-              <Text style={styles.buttonText}>LOGIN</Text>
+              <Text style={styles.buttonText}>Verify & Login</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -72,72 +80,100 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppColors.background,
   },
-  topMapContainer: {
-    height: '35%',
-    width: '100%',
-    backgroundColor: AppColors.background,
-    overflow: 'hidden',
-  },
-  mapPlaceholder: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: AppColors.accentLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomLeftRadius: 50,
-    borderBottomRightRadius: 50,
-    overflow: 'hidden',
-  },
-  watermarkImage: {
-    width: '100%',
-    height: '100%',
-    opacity: 0.15,
-  },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: Spacing.xl,
-    marginTop: -40,
+    paddingHorizontal: Spacing.lg + 8,
+    justifyContent: 'center',
+    paddingBottom: Spacing.xxl * 2,
   },
-  logoContainer: {
+  header: {
     alignItems: 'center',
     marginBottom: Spacing.xl,
+    marginTop: Spacing.xxl,
   },
-  logoSquare: {
-    width: 80,
-    height: 80,
-    backgroundColor: AppColors.brand,
-    borderRadius: Radii.logo,
+  logoOuter: {
+    width: 100,
+    height: 100,
+    backgroundColor: AppColors.accent,
+    borderRadius: Radii.card,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Shadows.card,
+    marginBottom: Spacing.xl,
   },
-  logoText: {
-    color: AppColors.background,
-    fontWeight: 'bold',
-    fontSize: 18,
-    fontStyle: 'italic',
+  logoInner: {
+    width: 60,
+    height: 60,
+    backgroundColor: AppColors.background,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...Shadows.subtle,
   },
   title: {
     ...Typography.screenTitle,
     textAlign: 'center',
+    marginBottom: Spacing.sm,
+  },
+  subtitle: {
+    ...Typography.body,
+    fontSize: 18,
     color: AppColors.textMuted,
-    marginBottom: Spacing.lg,
-    letterSpacing: 2,
+    textAlign: 'center',
   },
   formContainer: {
     width: '100%',
+    alignItems: 'center',
+  },
+  phoneInfo: {
+    fontSize: 16,
+    color: AppColors.textMuted,
+    marginBottom: Spacing.sm,
+  },
+  changeNumberBtn: {
+    marginBottom: Spacing.xl,
+  },
+  changeNumberText: {
+    fontSize: 16,
+    color: AppColors.brand,
+    fontWeight: '600',
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: AppColors.background,
+    borderRadius: Radii.input,
+    borderWidth: 2,
+    borderColor: AppColors.brand,
+    paddingHorizontal: Spacing.md,
+    marginBottom: Spacing.md,
+    width: '100%',
+  },
+  inputIcon: {
+    marginRight: Spacing.md,
   },
   input: {
-    ...CommonStyles.input,
-    fontSize: 24,
-    marginBottom: Spacing.xl,
+    flex: 1,
+    paddingVertical: 18,
+    fontSize: 20,
+    color: AppColors.brand,
     fontWeight: '700',
-    backgroundColor: AppColors.inputBg,
+    letterSpacing: 2,
+  },
+  errorText: {
+    fontSize: 14,
+    color: AppColors.error,
+    marginBottom: Spacing.xl,
+    alignSelf: 'flex-start',
   },
   button: {
     ...CommonStyles.primaryButton,
+    width: '100%',
+    borderRadius: Radii.card,
+    marginTop: Spacing.xs,
   },
   buttonText: {
     ...Typography.buttonText,
     color: AppColors.background,
+    fontSize: 18,
   },
 });

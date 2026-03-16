@@ -9,26 +9,28 @@ export const AppColors = {
   /** Main background */
   background: '#FFFFFF',
   /** Primary accent – light blue */
-  accent: '#A0D2E7',
+  accent: '#E6F4F1',
   /** Secondary accent – lighter blue */
-  accentLight: '#D1E8F5',
+  accentLight: '#F2F9F8',
   /** Accent button shade */
-  accentButton: '#A6D4EA',
+  accentButton: '#13949D',
   /** Dark brand color – logo, primary text, CTA buttons */
-  brand: '#1A1D20',
+  brand: '#0E8A93', // Teal color
   /** Secondary (muted) text */
-  textMuted: '#8A8D91',
+  textMuted: '#6B7280',
   /** Input placeholder */
-  placeholder: '#9A9FA5',
+  placeholder: '#9CA3AF',
   /** Input field background */
-  inputBg: '#EEF1F4',
+  inputBg: '#FFFFFF',
   /** Card / detail-block background */
-  cardBg: '#A0D2E7',
-  cardBgLight: '#D1E8F5',
+  cardBg: '#FFFFFF',
+  cardBgLight: '#F9FAFB',
   /** Borders & dividers */
-  border: '#E8EBED',
+  border: '#E5E7EB',
   /** Tab bar inactive */
-  tabInactive: '#A0A4A8',
+  tabInactive: '#9CA3AF',
+  /** Error text color */
+  error: '#DC2626',
 };
 
 // ─── Spacing ────────────────────────────────────────────────────────────────
@@ -145,6 +147,8 @@ export const CommonStyles = {
   input: {
     backgroundColor: AppColors.inputBg,
     borderRadius: Radii.input,
+    borderWidth: 1,
+    borderColor: AppColors.brand,
     paddingVertical: 16,
     paddingHorizontal: 20,
     fontSize: 16,

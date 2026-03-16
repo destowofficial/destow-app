@@ -1,46 +1,37 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, Dimensions } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Feather } from '@expo/vector-icons';
-import { AppColors, Spacing, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
+
+const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
   // Date/Time state
-  const [date, setDate] = useState(new Date());
-  const [time, setTime] = useState(new Date());
+  const [date, setDate] = useState(new Date(2026, 2, 16)); // Default 16/03/2026 for demo based on image
+  const [time, setTime] = useState(new Date(new Date().setHours(10, 0, 0, 0))); // Default 10:00 for demo
   
   // Picker visibility state
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
   const handleBook = () => {
-    // Navigate to cab listing screen
     router.push('/cab-listing');
   };
 
   const onDateChange = (event: any, selectedDate?: Date) => {
-    // Hide picker immediately on Android after selection
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-    if (selectedDate) {
-      setDate(selectedDate);
-    }
+    if (Platform.OS === 'android') setShowDatePicker(false);
+    if (selectedDate) setDate(selectedDate);
   };
 
   const onTimeChange = (event: any, selectedTime?: Date) => {
-    // Hide picker immediately on Android after selection
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-    if (selectedTime) {
-      setTime(selectedTime);
-    }
+    if (Platform.OS === 'android') setShowTimePicker(false);
+    if (selectedTime) setTime(selectedTime);
   };
 
   const formatDate = (dateObj: Date) => {
@@ -53,101 +44,148 @@ export default function HomeScreen() {
 
   const formatTime = (timeObj: Date) => {
     return timeObj.toLocaleTimeString('en-US', {
-      hour: 'numeric',
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: true
+      hour12: false
     });
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        style={{ flex: 1 }} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView contentContainerStyle={styles.scrollContainer}>
-          
-          <View style={styles.header}>
-            <Text style={styles.logoText}>DESTOW</Text>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContainer} bounces={false}>
+        
+        {/* Header Hero Section */}
+        <View style={styles.heroSection}>
+          <Image 
+             source={require('../../assets/images/wallpaper.jpg')}
+            style={styles.heroImage} 
+            resizeMode="cover" 
+          />
+          <View style={styles.heroOverlay}>
+            <SafeAreaView edges={['top']}>
+              <View style={styles.headerContent}>
+                <View>
+                  <Text style={styles.greetingLight}>Hello,</Text>
+                  <Text style={styles.greetingBold}>Rahul</Text>
+                </View>
+                {/* Placeholder for Profile Avatar */}
+                <View style={styles.avatarPlaceholder} />
+              </View>
+            </SafeAreaView>
           </View>
+        </View>
 
-          <View style={styles.mapBackground} pointerEvents="none">
-            <Image 
-              source={require('../../assets/images/background.png')} 
-              style={styles.watermarkImage}
-              resizeMode="contain"
-            />
-          </View>
+        {/* Floating Search Card */}
+        <View style={styles.searchCardWrapper}>
+          <View style={styles.searchCard}>
+            
+            {/* Route Timeline */}
+            <View style={styles.routeContainer}>
+              <View style={styles.timelineColumn}>
+                <View style={[styles.dot, {backgroundColor: AppColors.brand}]} />
+                <View style={styles.line} />
+                <View style={styles.swapIconContainer}>
+                  <Feather name="repeat" size={14} color={AppColors.brand} />
+                </View>
+                <View style={styles.line} />
+                <View style={[styles.dot, {backgroundColor: AppColors.error}]} />
+              </View>
+              
+              <View style={styles.locationsColumn}>
+                <View style={styles.locationInput}>
+                  <Text style={styles.locationLabel}>LEAVING FROM</Text>
+                  <View style={styles.locationRow}>
+                    <Feather name="map-pin" size={18} color={AppColors.brand} style={styles.locationIcon} />
+                    <TextInput 
+                      style={styles.locationInputText}
+                      placeholder="Delhi"
+                      placeholderTextColor={AppColors.brand}
+                      value={from}
+                      onChangeText={setFrom}
+                      selectionColor={AppColors.brand}
+                    />
+                  </View>
+                </View>
 
-          <View style={styles.formContainer}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>FROM</Text>
-              <TextInput 
-                style={styles.input}
-                placeholder="NEW DELHI"
-                placeholderTextColor={AppColors.placeholder}
-                value={from}
-                onChangeText={setFrom}
-              />
+                <View style={styles.locationDivider} />
+
+                <View style={styles.locationInput}>
+                  <Text style={styles.locationLabel}>GOING TO</Text>
+                  <View style={styles.locationRow}>
+                    <Feather name="map-pin" size={18} color={AppColors.error} style={styles.locationIcon} />
+                    <TextInput 
+                      style={styles.locationInputText}
+                      placeholder="Jaipur"
+                      placeholderTextColor={AppColors.brand}
+                      value={to}
+                      onChangeText={setTo}
+                      selectionColor={AppColors.brand}
+                    />
+                  </View>
+                </View>
+              </View>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>TO</Text>
-              <TextInput 
-                style={styles.input}
-                placeholder="CHANDIGARH"
-                placeholderTextColor={AppColors.placeholder}
-                value={to}
-                onChangeText={setTo}
-              />
+            {/* Date and Time Pickers */}
+            <View style={styles.dateTimeContainer}>
+              <View style={styles.dateTimeBlock}>
+                <Text style={styles.dateTimeLabel}>PICKUP DATE</Text>
+                <TouchableOpacity style={styles.pickerButton} onPress={() => setShowDatePicker(true)}>
+                  <Feather name="calendar" size={18} color={AppColors.brand} />
+                  <Text style={styles.pickerText}>{formatDate(date)}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.dateTimeBlock}>
+                <Text style={styles.dateTimeLabel}>PICKUP TIME</Text>
+                <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTimePicker(true)}>
+                  <Feather name="clock" size={18} color={AppColors.brand} />
+                  <Text style={styles.pickerText}>{formatTime(time)}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>PICKUP DATE</Text>
-              <TouchableOpacity 
-                style={styles.pickerButton} 
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Text style={styles.pickerText}>{formatDate(date)}</Text>
-                <Feather name="calendar" size={20} color={AppColors.textMuted} />
-              </TouchableOpacity>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={date}
-                  mode="date"
-                  display="default"
-                  onChange={onDateChange}
-                  minimumDate={new Date()}
-                />
-              )}
-            </View>
+            {showDatePicker && (
+              <DateTimePicker value={date} mode="date" display="default" onChange={onDateChange} minimumDate={new Date()} />
+            )}
+            {showTimePicker && (
+              <DateTimePicker value={time} mode="time" display="default" onChange={onTimeChange} />
+            )}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>PICKUP TIME</Text>
-              <TouchableOpacity 
-                style={styles.pickerButton} 
-                onPress={() => setShowTimePicker(true)}
-              >
-                <Text style={styles.pickerText}>{formatTime(time)}</Text>
-                <Feather name="clock" size={20} color={AppColors.textMuted} />
-              </TouchableOpacity>
-              {showTimePicker && (
-                <DateTimePicker
-                  value={time}
-                  mode="time"
-                  display="default"
-                  onChange={onTimeChange}
-                />
-              )}
-            </View>
-
-            <TouchableOpacity style={styles.bookButton} onPress={handleBook}>
-              <Text style={styles.bookButtonText}>BOOK</Text>
+            <TouchableOpacity style={styles.searchButton} onPress={handleBook}>
+              <Text style={styles.searchButtonText}>Search Cabs</Text>
             </TouchableOpacity>
+
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+        </View>
+
+        {/* Features Section */}
+        <View style={styles.featuresSection}>
+          <Text style={styles.sectionTitle}>Why choose Destow?</Text>
+          
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.featuresScroll}>
+            <View style={styles.featureCard}>
+              <View style={styles.featureIconOuter}>
+                <View style={styles.featureIconInner}>
+                  <MaterialCommunityIcons name="shield-check-outline" size={24} color={AppColors.brand} />
+                </View>
+              </View>
+              <Text style={styles.featureText}>Verified Drivers</Text>
+            </View>
+
+            <View style={styles.featureCard}>
+              <View style={styles.featureIconOuter}>
+                <View style={[styles.featureIconInner, {backgroundColor: AppColors.background}]}>
+                  <Feather name="search" size={24} color={AppColors.brand} />
+                </View>
+              </View>
+              <Text style={styles.featureText}>Transparent{'\n'}Pricing</Text>
+            </View>
+          </ScrollView>
+        </View>
+
+      </ScrollView>
+    </View>
   );
 }
 
@@ -158,63 +196,204 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flexGrow: 1,
+    paddingBottom: Spacing.xl * 2,
+  },
+  heroSection: {
+    height: 320, // Taller size to match image layout
+    width: '100%',
+    position: 'relative',
+  },
+  heroImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)', // Slight dark overlay
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
-    paddingBottom: Spacing.xl,
   },
-  header: {
-    alignItems: 'center',
-    marginBottom: Spacing.xl,
-    marginTop: Spacing.sm,
-  },
-  logoText: {
-    ...Typography.screenTitle,
-  },
-  mapBackground: {
-    position: 'absolute',
-    top: 150,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: -1,
-  },
-  watermarkImage: {
-    width: '120%',
-    height: '120%',
-    opacity: 0.05,
-    backgroundColor: AppColors.brand,
-  },
-  formContainer: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  inputGroup: {
-    marginBottom: Spacing.lg,
-  },
-  label: {
-    ...Typography.label,
-  },
-  input: {
-    ...CommonStyles.input,
-  },
-  pickerButton: {
-    ...CommonStyles.input,
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: Spacing.xl,
+  },
+  greetingLight: {
+    fontSize: 24,
+    color: AppColors.background,
+    fontWeight: '400',
+  },
+  greetingBold: {
+    fontSize: 32,
+    color: AppColors.background,
+    fontWeight: '800',
+    marginTop: -4,
+  },
+  avatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.7)',
+  },
+  searchCardWrapper: {
+    marginTop: -100, // Pull card up into hero section
+    paddingHorizontal: Spacing.lg,
+    zIndex: 10,
+  },
+  searchCard: {
+    backgroundColor: AppColors.background,
+    borderRadius: Radii.card,
+    padding: Spacing.lg,
+    ...Shadows.card,
+  },
+  routeContainer: {
+    flexDirection: 'row',
+    marginBottom: Spacing.lg,
+  },
+  timelineColumn: {
+    width: 30,
+    alignItems: 'center',
+    paddingTop: 36,
+    paddingBottom: 24,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: AppColors.accent,
+  },
+  line: {
+    width: 2,
+    flex: 1,
+    backgroundColor: AppColors.border,
+    marginVertical: 4,
+    borderStyle: 'dashed', // Note: React Native dashed borders can be tricky without direct SVG, will use solid light grey if unsupported
+  },
+  swapIconContainer: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: AppColors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+  },
+  locationsColumn: {
+    flex: 1,
+  },
+  locationInput: {
+    marginVertical: Spacing.sm,
+  },
+  locationLabel: {
+    ...Typography.label,
+    marginBottom: 4,
+    color: AppColors.textMuted,
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationIcon: {
+    marginRight: Spacing.sm,
+  },
+  locationInputText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: AppColors.brand,
+    paddingVertical: Spacing.xs,
+    flex: 1,
+  },
+  locationDivider: {
+    height: 1,
+    backgroundColor: AppColors.border,
+    marginVertical: Spacing.md,
+    marginLeft: 30, // aligning with text roughly
+  },
+  dateTimeContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.xl,
+  },
+  dateTimeBlock: {
+    flex: 1,
+    marginRight: Spacing.sm,
+  },
+  dateTimeLabel: {
+    ...Typography.label,
+    marginBottom: Spacing.sm,
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: AppColors.cardBgLight,
+    borderWidth: 1,
+    borderColor: AppColors.border,
+    borderRadius: Radii.input,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
   },
   pickerText: {
-    ...Typography.body,
-    fontWeight: '500',
-  },
-  bookButton: {
-    ...CommonStyles.accentButton,
-    marginTop: Spacing.lg,
-  },
-  bookButtonText: {
-    ...Typography.buttonText,
+    fontSize: 15,
+    fontWeight: '600',
     color: AppColors.brand,
+    marginLeft: Spacing.sm,
+  },
+  searchButton: {
+    ...CommonStyles.primaryButton,
+    width: '100%',
+    borderRadius: Radii.input,
+  },
+  searchButtonText: {
+    ...Typography.buttonText,
+    color: AppColors.background,
+    fontSize: 18,
+  },
+  featuresSection: {
+    paddingTop: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+  },
+  sectionTitle: {
+    ...Typography.sectionHeading,
+    marginBottom: Spacing.lg,
+  },
+  featuresScroll: {
+    paddingBottom: Spacing.lg,
+  },
+  featureCard: {
+    backgroundColor: AppColors.cardBgLight,
+    width: 140,
+    height: 150,
+    borderRadius: Radii.card,
+    marginRight: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+  },
+  featureIconOuter: {
+    backgroundColor: AppColors.accent,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  featureIconInner: {
+    backgroundColor: AppColors.background,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: AppColors.brand,
+    textAlign: 'center',
   },
 });
