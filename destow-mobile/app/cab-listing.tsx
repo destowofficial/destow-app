@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -5,6 +6,11 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 
 export default function CabListingScreen() {
+  const [denomination, setDenomination] = useState('₹');
+  const [sedanAmount, setSedanAmount] = useState('60');
+  const [suvAmount, setSuvAmount] = useState('100');
+  const [unitOfDistance, setUnitOfDistance] = useState('/km');
+
   const handleBack = () => {
     router.back();
   };
@@ -88,7 +94,7 @@ export default function CabListingScreen() {
             <View style={styles.priceRow}>
               <View>
                 <Text style={styles.priceLabel}>Estimated Fare</Text>
-                <Text style={styles.priceAmount}>₹3,360</Text>
+                <Text style={styles.priceAmount}>{denomination}{sedanAmount}{unitOfDistance}</Text>
                 <Text style={styles.priceSubtext}>Includes tolls & taxes</Text>
               </View>
               
@@ -148,7 +154,7 @@ export default function CabListingScreen() {
             <View style={styles.priceRow}>
               <View>
                 <Text style={styles.priceLabel}>Estimated Fare</Text>
-                <Text style={styles.priceAmount}>₹4,480</Text>
+                <Text style={styles.priceAmount}>{denomination}{suvAmount}{unitOfDistance}</Text>
                 <Text style={styles.priceSubtext}>Includes tolls & taxes</Text>
               </View>
               
