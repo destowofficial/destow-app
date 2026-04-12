@@ -1,14 +1,37 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
+import { useEffect, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { getProfile, UserProfile } from '../../services/user.service';
 
 export default function ProfileScreen() {
-  const handleLogout = () => {
-    // In a real app, clear auth state here
+  const { user: authUser, logout } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await getProfile();
+        setProfile(data);
+      } catch {
+        // Fall back to AuthContext user silently
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleLogout = async () => {
+    await logout();
     router.replace('/');
   };
+
+  const displayName = profile?.name ?? authUser?.name ?? '—';
+  const displayPhone = profile?.phone ?? authUser?.phone ?? '—';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -20,11 +43,17 @@ export default function ProfileScreen() {
           <View style={styles.avatarContainer}>
             <Feather name="user" size={40} color={AppColors.background} />
           </View>
-          <Text style={styles.userName}>Rahul Sharma</Text>
-          <View style={styles.phoneContainer}>
-            <Feather name="phone-call" size={14} color={AppColors.background} />
-            <Text style={styles.userPhone}>+91 9876543210</Text>
-          </View>
+          {isLoading ? (
+            <ActivityIndicator color={AppColors.background} style={{ marginVertical: Spacing.md }} />
+          ) : (
+            <>
+              <Text style={styles.userName}>{displayName}</Text>
+              <View style={styles.phoneContainer}>
+                <Feather name="phone-call" size={14} color={AppColors.background} />
+                <Text style={styles.userPhone}>{displayPhone}</Text>
+              </View>
+            </>
+          )}
         </View>
 
         {/* Action Menu List */}
@@ -150,7 +179,7 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: AppColors.border,
-    marginLeft: 70, // Align with text
+    marginLeft: 70,
   },
   logoutButton: {
     ...CommonStyles.primaryButton,

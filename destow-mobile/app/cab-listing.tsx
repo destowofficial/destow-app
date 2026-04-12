@@ -1,22 +1,90 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { router } from 'expo-router';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, ActivityIndicator, Alert } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
+import { Feather } from '@expo/vector-icons';
+import { AppColors, Spacing, Radii, Shadows, Typography } from '../constants/design-tokens';
+import { useEffect, useState } from 'react';
+import { getAvailableCabs, Cab, bookCab, processPayment } from '../services/cabs.service';
+
+// Map backend imageKey (cab type name) to local assets
+const CAB_IMAGES: Record<string, any> = {
+  sedan: require('../assets/images/sedan.png'),
+  suv: require('../assets/images/suv.png'),
+};
+
+function getCabImage(imageKey: string | null) {
+  if (!imageKey) return require('../assets/images/sedan.png');
+  const key = imageKey.toLowerCase();
+  return CAB_IMAGES[key] ?? require('../assets/images/sedan.png');
+}
 
 export default function CabListingScreen() {
-  const [denomination, setDenomination] = useState('₹');
-  const [sedanAmount, setSedanAmount] = useState('60');
-  const [suvAmount, setSuvAmount] = useState('100');
-  const [unitOfDistance, setUnitOfDistance] = useState('/km');
+  const params = useLocalSearchParams<{
+    from: string;
+    to: string;
+    date: string;
+    time: string;
+    distanceKm: string;
+  }>();
 
-  const handleBack = () => {
-    router.back();
+  const [cabs, setCabs] = useState<Cab[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [bookingCabId, setBookingCabId] = useState<string | null>(null);
+
+  const from = params.from ?? 'Origin';
+  const to = params.to ?? 'Destination';
+  const distanceKm = parseFloat(params.distanceKm ?? '0');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const results = await getAvailableCabs(from, to, params.date ?? '', params.time ?? '', distanceKm);
+        setCabs(results);
+      } catch (e: any) {
+        Alert.alert('Error', e?.message ?? 'Could not load cabs. Is the backend running?');
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleBook = async (cab: Cab) => {
+    setBookingCabId(cab.id);
+    try {
+      // Build pickup datetime from date + time params
+      const pickupDatetime = `${params.date ?? new Date().toISOString().split('T')[0]}T${params.time ?? '10:00'}:00+05:30`;
+      const booking = await bookCab({
+        cabId: cab.id,
+        from,
+        to,
+        pickupDatetime,
+        distanceKm: cab.distanceKm,
+        totalFare: cab.totalFare,
+        paymentMethod: 'upi',
+      });
+
+      // Auto-process payment (MVP flow)
+      await processPayment(booking.id, 'upi');
+
+      Alert.alert(
+        '🎉 Booking Confirmed!',
+        `Your ${cab.cabType.name} from ${from} to ${to} is booked.\nFare: ₹${cab.totalFare}`,
+        [{ text: 'View Trips', onPress: () => router.replace('/(tabs)') }]
+      );
+    } catch (e: any) {
+      Alert.alert('Booking Failed', e?.message ?? 'Could not complete booking.');
+    } finally {
+      setBookingCabId(null);
+    }
   };
 
-  const handleBook = () => {
-    console.log('Book clicked');
+  const handleBack = () => router.back();
+
+  // Format date for display: "YYYY-MM-DD" → "Mon, DD Mon"
+  const formatDisplayDate = () => {
+    if (!params.date) return '';
+    const d = new Date(params.date);
+    return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
   };
 
   return (
@@ -31,143 +99,98 @@ export default function CabListingScreen() {
             
             <View style={styles.headerTextContainer}>
               <View style={styles.routeRow}>
-                <Text style={styles.routeText}>Delhi</Text>
+                <Text style={styles.routeText}>{from}</Text>
                 <Feather name="arrow-right" size={20} color={AppColors.background} style={styles.routeIcon} />
-                <Text style={styles.routeText}>Jaipur</Text>
+                <Text style={styles.routeText}>{to}</Text>
               </View>
-              <Text style={styles.dateText}>Mon, 16 Mar • 10:00</Text>
+              <Text style={styles.dateText}>{formatDisplayDate()} • {params.time ?? ''}</Text>
             </View>
           </View>
         </SafeAreaView>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContainer} bounces={false}>
-        
-        {/* Cab Card 1 - Sedan */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.cardHeader}>
-            <View style={styles.agencyBadge}>
-              <Text style={styles.agencyText}>SWIFT TRAVELS</Text>
-            </View>
-            <View style={styles.driverBadge}>
-              <Feather name="check-circle" size={14} color="#10B981" style={{marginRight: 4}} />
-              <Text style={styles.driverText}>Driver</Text>
-            </View>
-            <View style={{flex: 1}} />
-            <View style={styles.distanceBadge}>
-              <Feather name="map-pin" size={12} color={AppColors.textMuted} style={{marginRight: 4}} />
-              <Text style={styles.distanceText}>280 km</Text>
-            </View>
-          </View>
-
-          <View style={styles.cardContent}>
-            
-            {/* Top row of card content: Icon/Image + Name/Details */}
-            <View style={styles.carInfoRow}>
-              <View style={styles.carIconBox}>
-                <Image source={require('../assets/images/sedan.png')} style={styles.carImage} resizeMode="contain" />
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={AppColors.brand} />
+          <Text style={styles.loadingText}>Finding cabs…</Text>
+        </View>
+      ) : cabs.length === 0 ? (
+        <View style={styles.loadingContainer}>
+          <Feather name="inbox" size={48} color={AppColors.textMuted} />
+          <Text style={styles.loadingText}>No cabs available for this route.</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContainer} bounces={false}>
+          {cabs.map((cab) => (
+            <View key={cab.id} style={styles.cardWrapper}>
+              <View style={styles.cardHeader}>
+                <View style={styles.agencyBadge}>
+                  <Text style={styles.agencyText}>{cab.agencyName.toUpperCase()}</Text>
+                </View>
+                {cab.driverAvailable && (
+                  <View style={styles.driverBadge}>
+                    <Feather name="check-circle" size={14} color="#10B981" style={{marginRight: 4}} />
+                    <Text style={styles.driverText}>Driver</Text>
+                  </View>
+                )}
+                <View style={{flex: 1}} />
+                <View style={styles.distanceBadge}>
+                  <Feather name="map-pin" size={12} color={AppColors.textMuted} style={{marginRight: 4}} />
+                  <Text style={styles.distanceText}>{cab.distanceKm} km</Text>
+                </View>
               </View>
-              
-              <View style={styles.carDetails}>
-                <Text style={styles.carName}>Sedan</Text>
-                <View style={styles.carFeaturesRow}>
-                  <View style={styles.carFeature}>
-                    <Feather name="users" size={14} color={AppColors.textMuted} />
-                    <Text style={styles.carFeatureText}>4 Seats</Text>
+
+              <View style={styles.cardContent}>
+                <View style={styles.carInfoRow}>
+                  <View style={styles.carIconBox}>
+                    <Image source={getCabImage(cab.cabType.imageKey)} style={styles.carImage} resizeMode="contain" />
                   </View>
-                  <View style={styles.carFeature}>
-                    <Feather name="briefcase" size={14} color={AppColors.textMuted} />
-                    <Text style={styles.carFeatureText}>2 Bags</Text>
+                  
+                  <View style={styles.carDetails}>
+                    <Text style={styles.carName}>{cab.cabType.name}</Text>
+                    <View style={styles.carFeaturesRow}>
+                      <View style={styles.carFeature}>
+                        <Feather name="users" size={14} color={AppColors.textMuted} />
+                        <Text style={styles.carFeatureText}>{cab.cabType.seats} Seats</Text>
+                      </View>
+                      <View style={styles.carFeature}>
+                        <Feather name="briefcase" size={14} color={AppColors.textMuted} />
+                        <Text style={styles.carFeatureText}>{cab.cabType.bags} Bags</Text>
+                      </View>
+                    </View>
                   </View>
+                </View>
+
+                <View style={styles.dashedDivider}>
+                  <Text style={{color: AppColors.border}} numberOfLines={1}>
+                    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+                  </Text>
+                </View>
+
+                <View style={styles.priceRow}>
+                  <View>
+                    <Text style={styles.priceLabel}>Estimated Fare</Text>
+                    <Text style={styles.priceAmount}>₹{cab.totalFare}</Text>
+                    <Text style={styles.priceSubtext}>Includes tolls & taxes</Text>
+                  </View>
+                  
+                  <TouchableOpacity
+                    style={styles.bookButton}
+                    onPress={() => handleBook(cab)}
+                    disabled={bookingCabId !== null}
+                  >
+                    {bookingCabId === cab.id ? (
+                      <ActivityIndicator color={AppColors.background} />
+                    ) : (
+                      <Text style={styles.bookButtonText}>Book</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
-
-            {/* Dashed divider */}
-            <View style={styles.dashedDivider}>
-              <Text style={{color: AppColors.border}} numberOfLines={1}>
-                - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-              </Text>
-            </View>
-
-            {/* Bottom row: Price + Book Button */}
-            <View style={styles.priceRow}>
-              <View>
-                <Text style={styles.priceLabel}>Estimated Fare</Text>
-                <Text style={styles.priceAmount}>{denomination}{sedanAmount}{unitOfDistance}</Text>
-                <Text style={styles.priceSubtext}>Includes tolls & taxes</Text>
-              </View>
-              
-              <TouchableOpacity style={styles.bookButton} onPress={handleBook}>
-                <Text style={styles.bookButtonText}>Book</Text>
-              </TouchableOpacity>
-            </View>
-
-          </View>
-        </View>
-
-        {/* Cab Card 2 - SUV */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.cardHeader}>
-            <View style={styles.agencyBadge}>
-              <Text style={styles.agencyText}>SWIFT TRAVELS</Text>
-            </View>
-            <View style={styles.driverBadge}>
-              <Feather name="check-circle" size={14} color="#10B981" style={{marginRight: 4}} />
-              <Text style={styles.driverText}>Driver</Text>
-            </View>
-            <View style={{flex: 1}} />
-            <View style={styles.distanceBadge}>
-              <Feather name="map-pin" size={12} color={AppColors.textMuted} style={{marginRight: 4}} />
-              <Text style={styles.distanceText}>280 km</Text>
-            </View>
-          </View>
-
-          <View style={styles.cardContent}>
-            
-            <View style={styles.carInfoRow}>
-              <View style={styles.carIconBox}>
-                 <Image source={require('../assets/images/suv.png')} style={styles.carImage} resizeMode="contain" />
-              </View>
-              
-              <View style={styles.carDetails}>
-                <Text style={styles.carName}>SUV</Text>
-                <View style={styles.carFeaturesRow}>
-                  <View style={styles.carFeature}>
-                    <Feather name="users" size={14} color={AppColors.textMuted} />
-                    <Text style={styles.carFeatureText}>6 Seats</Text>
-                  </View>
-                  <View style={styles.carFeature}>
-                    <Feather name="briefcase" size={14} color={AppColors.textMuted} />
-                    <Text style={styles.carFeatureText}>2 Bags</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.dashedDivider}>
-              <Text style={{color: AppColors.border}} numberOfLines={1}>
-                - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-              </Text>
-            </View>
-
-            <View style={styles.priceRow}>
-              <View>
-                <Text style={styles.priceLabel}>Estimated Fare</Text>
-                <Text style={styles.priceAmount}>{denomination}{suvAmount}{unitOfDistance}</Text>
-                <Text style={styles.priceSubtext}>Includes tolls & taxes</Text>
-              </View>
-              
-              <TouchableOpacity style={styles.bookButton} onPress={handleBook}>
-                <Text style={styles.bookButtonText}>Book</Text>
-              </TouchableOpacity>
-            </View>
-
-          </View>
-        </View>
-
-      </ScrollView>
-
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -175,7 +198,7 @@ export default function CabListingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB', // Light grey background like in the image
+    backgroundColor: '#F9FAFB',
   },
   headerBackground: {
     backgroundColor: AppColors.brand,
@@ -215,6 +238,17 @@ const styles = StyleSheet.create({
     color: AppColors.background,
     opacity: 0.9,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: Spacing.lg,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: AppColors.textMuted,
+    marginTop: Spacing.md,
+  },
   scrollContainer: {
     padding: Spacing.lg,
     paddingBottom: Spacing.xxl * 2,
@@ -251,7 +285,7 @@ const styles = StyleSheet.create({
   driverText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#10B981', // Green 
+    color: '#10B981',
   },
   distanceBadge: {
     flexDirection: 'row',
@@ -343,6 +377,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 32,
     borderRadius: 12,
+    minWidth: 80,
+    alignItems: 'center',
     ...Shadows.button,
   },
   bookButtonText: {
