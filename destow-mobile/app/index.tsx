@@ -6,11 +6,6 @@ import {
 import { router } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 import { Feather } from '@expo/vector-icons';
-import auth from '@react-native-firebase/auth';
-
-// Store the confirmation result so the OTP screen can confirm it
-export let pendingConfirmation: any = null;
-export let pendingName: string = '';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
@@ -26,17 +21,12 @@ export default function LoginScreen() {
     }
     setError('');
     setIsLoading(true);
-    try {
-      const confirmation = await auth().signInWithPhoneNumber(`+91${cleanPhone}`);
-      pendingConfirmation = confirmation;
-      pendingName = name.trim();
-      router.push({ pathname: '/otp', params: { phone: cleanPhone, name: name.trim() } });
-    } catch (e: any) {
-      console.error('OTP send error:', e);
-      setError(e?.message ?? 'Failed to send OTP. Please try again.');
-    } finally {
+    
+    // Simulate network delay
+    setTimeout(() => {
       setIsLoading(false);
-    }
+      router.push({ pathname: '/otp', params: { phone: cleanPhone, name: name.trim() } });
+    }, 800);
   };
 
   return (

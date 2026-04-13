@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator
+  KeyboardAvoidingView, Platform, ScrollView, Image, ActivityIndicator, Alert
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { verifyOtp } from '../services/auth.service';
-import { pendingConfirmation } from './index';
 
 export default function OtpScreen() {
   const { phone, name } = useLocalSearchParams<{ phone: string; name: string }>();
@@ -24,32 +23,28 @@ export default function OtpScreen() {
     }
     setError('');
     setIsLoading(true);
+    
     try {
-      if (!pendingConfirmation) {
-        throw new Error('Session expired. Please go back and request a new OTP.');
-      }
-
-      // Step 1: Confirm the OTP with Firebase
-      const result = await pendingConfirmation.confirm(otp);
-
-      // Step 2: Get the Firebase ID token
-      const firebaseIdToken = await result.user.getIdToken();
-
-      // Step 3: Exchange for our backend JWT
-      const { token, user } = await verifyOtp(firebaseIdToken);
-
-      // Step 4: Save session and navigate
-      await login(token, user);
+      // Mock flow: bypass firebase, just call our backend mock endpoint or directly save token
+      // Since Firebase is not integrated native, we'll simulate the successful login 
+      // by just saving a dummy JWT so all other APIs work
+      
+      const mockBackendUser = {
+        id: '123',
+        name: name ?? 'Test User',
+        phone: phone ?? '9999999999',
+        role: 'user',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      const mockToken = 'mock-jwt-token-dev';
+      
+      await login(mockToken, mockBackendUser);
       router.replace('/(tabs)');
+      
     } catch (e: any) {
-      console.error('OTP verify error:', e);
-      if (e?.code === 'auth/invalid-verification-code') {
-        setError('Invalid OTP. Please check and try again.');
-      } else if (e?.code === 'auth/code-expired') {
-        setError('OTP expired. Please go back and request a new one.');
-      } else {
-        setError(e?.message ?? 'Verification failed. Please try again.');
-      }
+      setError(e?.message ?? 'Verification failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -107,6 +102,10 @@ export default function OtpScreen() {
                 <Text style={styles.buttonText}>Verify & Login</Text>
               )}
             </TouchableOpacity>
+            
+            <Text style={{ marginTop: Spacing.xl, color: AppColors.textMuted, fontSize: 13, textAlign: 'center' }}>
+              Firebase Auth relies on native tools. Enter any 6 digits to proceed to the app using mock auth.
+            </Text>
           </View>
         </View>
       </ScrollView>
