@@ -1,139 +1,136 @@
-# Destow Backend API
+# 🚕 Destow API
 
-Node.js + TypeScript + Hono backend for the Destow intercity cab booking app.
+[![Node.js](https://img.shields.io/badge/Node.js-v22-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Hono](https://img.shields.io/badge/Hono-Ultra--Fast-FF5722?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev/)
+[![Drizzle](https://img.shields.io/badge/Drizzle-ORM-C5F74F?style=for-the-badge&logo=drizzle&logoColor=black)](https://orm.drizzle.team/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Managed-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Firebase](https://img.shields.io/badge/Firebase-Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
 
-## Tech Stack
-- **Runtime**: Node.js v22
-- **Framework**: [Hono](https://hono.dev/) — ultra-fast TypeScript web framework
-- **ORM**: Drizzle ORM + `pg` driver
-- **Database**: PostgreSQL (local dev)
-- **Auth**: Firebase Admin SDK (Phone OTP + Google SSO) → our own JWT
-- **Validation**: Zod
+The high-performance backend infrastructure for **Destow** — the premium intercity cab booking platform. Built with a focus on speed, reliability, and security using modern TypeScript tooling.
 
 ---
 
-## 🔥 Firebase Setup (First-Time)
+## 🏗️ Technical Architecture
 
-1. Go to [Firebase Console](https://console.firebase.google.com/) → **Add project** → name it `destow`
-2. In your project: **Authentication** → **Sign-in method** → Enable **Phone** and **Google**
-3. Go to **Project Settings** → **Service Accounts** tab
-4. Click **Generate New Private Key** → download the JSON file
-5. From the JSON file, copy these values into your `.env`:
-   - `FIREBASE_PROJECT_ID` → `project_id`
-   - `FIREBASE_CLIENT_EMAIL` → `client_email`
-   - `FIREBASE_PRIVATE_KEY` → `private_key` (copy the whole string including `-----BEGIN PRIVATE KEY-----`)
-6. In your React Native mobile app: add **Firebase SDK** and use `firebase/auth` for `signInWithPhoneNumber` and `GoogleAuthProvider` — after the user authenticates, send the `idToken` to our backend.
+Destow Backend follows a modular architecture designed for scalability and maintainability.
+
+- **Fastest in Class**: Powered by **Hono**, delivering lightning-fast response times.
+- **Type-Safe ORM**: Utilizing **Drizzle ORM** for predictable and efficient database operations.
+- **Robust Auth**: Hybrid authentication using **Firebase Admin SDK** for verification and custom **JWT** for application state.
+- **Data Integrity**: strict validation across all layers using **Zod**.
 
 ---
 
-## 🗄️ Local PostgreSQL Setup
+## 🔥 Key Features
 
-1. Install PostgreSQL from [postgresql.org](https://www.postgresql.org/download/)
-2. Create the database:
-   ```sql
-   CREATE DATABASE destow_db;
-   ```
-3. Copy `.env.example` to `.env` and update `DATABASE_URL`:
-   ```
-   DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/destow_db
-   ```
+- ✅ **Authentication**: Phone OTP and Google SSO via Firebase integration.
+- 👤 **Profile Management**: Secure user identity and profile synchronization.
+- 🏠 **Smart Dashboard**: Context-aware user information and cab search analytics.
+- 🚗 **Cab Inventory**: Dynamic availability checking and pricing for multiple tiers (Sedan, SUV, Mini).
+- 📅 **Intercity Bookings**: End-to-end booking workflow with automated fare calculation.
+- 💳 **Payment Orchestration**: Comprehensive tracking of transactions and payment statuses.
+- 📜 **Trip History**: Infinite-scroll ready paginated history with status filtering.
 
 ---
 
-## 🚀 Getting Started
+## 🛠️ Tech Stack & Dependencies
 
+| Layer | Technology |
+| :--- | :--- |
+| **Runtime** | Node.js v22 (LTS) |
+| **Framework** | Hono Framework |
+| **Language** | TypeScript |
+| **ORM** | Drizzle ORM |
+| **Database** | PostgreSQL |
+| **Security** | Firebase Admin + JWT + Zod |
+| **Tooling** | tsx, drizzle-kit |
+
+---
+
+## 🚦 Getting Started
+
+### 1️⃣ Prerequisites
+- **Node.js** v22 or higher
+- **PostgreSQL** instance
+- **Firebase Project** with Phone & Google Auth enabled
+
+### 2️⃣ Environment Setup
+Clone and configure your environment:
+```bash
+cp .env.example .env
+```
+Ensure the following variables are defined:
+```env
+PORT=3000
+DATABASE_URL=postgresql://user:pass@localhost:5432/destow_db
+JWT_SECRET=your_super_secret_key
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CLIENT_EMAIL=your-service-account-email
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
+```
+
+### 3️⃣ Installation & DB Initialization
 ```bash
 # Install dependencies
 npm install
 
-# Copy env template
-cp .env.example .env
-# → Fill in your PostgreSQL URL, Firebase credentials, JWT secret
-
-# Generate DB migrations (run after any schema changes)
+# Generate and apply migrations
 npm run db:generate
-
-# Run migrations to create tables
 npm run db:migrate
 
-# Seed default cab types (Sedan, SUV, Mini)
+# Seed initial data (Cab Types)
 npx tsx src/db/seed.ts
+```
 
-# Start development server with hot reload
+### 4️⃣ Development
+```bash
 npm run dev
 ```
-
-Server starts at **http://localhost:3000**
+Server will be live at `http://localhost:3000`
 
 ---
 
-## 📌 API Reference
+## 📂 Project Structure
 
-Base URL: `http://localhost:3000/api/v1`
+```text
+src/
+├── config/           # Validated environment & service configurations
+├── db/               # Schema definitions, migrations, and seeders
+├── middleware/       # Auth guard and request interceptors
+├── modules/          # Domain-driven features (Auth, Cabs, Users, etc.)
+├── utils/            # Shared helpers and response formatters
+└── index.ts          # Application entry point & route registration
+```
 
-All protected routes (🔒) require: `Authorization: Bearer <token>`
+---
 
-### Auth
-| Method | Path | Body | Auth |
-|--------|------|------|------|
-| `POST` | `/auth/verify-otp` | `{ firebaseIdToken }` | ❌ |
-| `POST` | `/auth/google-sso` | `{ firebaseIdToken }` | ❌ |
+## 📡 API Endpoints (v1)
 
-### Users
-| Method | Path | Body | Auth |
-|--------|------|------|------|
-| `GET` | `/users/me` | — | 🔒 |
-| `PUT` | `/users/me` | `{ name?, avatarUrl? }` | 🔒 |
+### Authentication
+- `POST /api/v1/auth/verify-otp` - Verify Firebase Phone OTP
+- `POST /api/v1/auth/google-sso` - Authenticate via Google
 
-### Home
-| Method | Path | Body | Auth |
-|--------|------|------|------|
-| `GET` | `/home/user-info` | — | 🔒 |
-| `POST` | `/home/search` | `{ from, to, date, time }` | 🔒 |
+### Users & Home
+- `GET  /api/v1/users/me` - Retrieve current profile
+- `PUT  /api/v1/users/me` - Update profile details
+- `GET  /api/v1/home/user-info` - Dashboard-related data
+- `POST /api/v1/home/search` - Regional availability search
 
-### Cabs
-| Method | Path | Body | Auth |
-|--------|------|------|------|
-| `POST` | `/cabs/available` | `{ from, to, date, time, distanceKm? }` | 🔒 |
-| `POST` | `/cabs/book` | `{ cabId, from, to, pickupDatetime, distanceKm, totalFare, paymentMethod }` | 🔒 |
-| `POST` | `/cabs/payment` | `{ bookingId, method, transactionRef? }` | 🔒 |
+### Cabs & Bookings
+- `POST /api/v1/cabs/available` - List cabs for a route
+- `POST /api/v1/cabs/book` - Initialize a new booking
+- `POST /api/v1/cabs/payment` - Update payment status
 
 ### History
-| Method | Path | Query | Auth |
-|--------|------|-------|------|
-| `GET` | `/history` | `?page=1&limit=10&status=completed` | 🔒 |
+- `GET  /api/v1/history` - Retrieve trip history (Paginated)
 
 ---
 
-## 📁 Project Structure
-
-```
-src/
-├── index.ts              # Server entry point
-├── config/
-│   ├── env.ts            # Zod-validated env vars
-│   └── firebase.ts       # Firebase Admin init
-├── db/
-│   ├── schema.ts         # Drizzle ORM schema
-│   ├── connection.ts     # DB pool
-│   ├── seed.ts           # Seed cab types
-│   └── migrations/       # Auto-generated SQL migrations
-├── middleware/
-│   └── auth.middleware.ts
-├── modules/
-│   ├── auth/             # verify-otp, google-sso
-│   ├── users/            # GET/PUT /me
-│   ├── home/             # user-info, search
-│   ├── cabs/             # available, book, payment
-│   └── history/          # paginated trip history
-└── utils/
-    └── response.ts       # JSON response helpers
-```
+## 🧪 Testing
+The Postman collection for this API can be found in `/postman`. Import `Destow_API.postman_collection.json` to start testing the endpoints immediately.
 
 ---
 
-## 🧪 Testing with Postman
-
-Import the collection from `postman/Destow_API.postman_collection.json`.
-
-Set the `baseUrl` collection variable to `http://localhost:3000/api/v1` and `token` after authenticating.
+<p align="center">
+  Built with ❤️ for the Destow Ecosystem
+</p>

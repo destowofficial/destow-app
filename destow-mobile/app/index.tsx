@@ -6,12 +6,16 @@ import {
 import { router } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 import { Feather } from '@expo/vector-icons';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import firebase from '../firebaseConfig';
+import { auth } from '../firebaseConfig';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
 
   const handleSendOTP = async () => {
     const cleanPhone = phone.replace(/\D/g, '');
@@ -22,11 +26,27 @@ export default function LoginScreen() {
     setError('');
     setIsLoading(true);
     
-    // Simulate network delay
-    setTimeout(() => {
+    try {
+      const phoneProvider = new firebase.auth.PhoneAuthProvider();
+      const verificationId = await phoneProvider.verifyPhoneNumber(
+        `+91${cleanPhone}`,
+        recaptchaVerifier.current!
+      );
+      
       setIsLoading(false);
-      router.push({ pathname: '/otp', params: { phone: cleanPhone, name: name.trim() } });
-    }, 800);
+      router.push({ 
+        pathname: '/otp', 
+        params: { 
+          phone: cleanPhone, 
+          name: name.trim(),
+          verificationId: verificationId
+        } 
+      });
+    } catch (err: any) {
+      console.error('Firebase Auth Error:', err);
+      setError(err.message || 'Failed to send OTP. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -34,6 +54,11 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifier}
+        firebaseConfig={auth.app.options}
+        attemptInvisibleRetries={5}
+      />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
         <View style={styles.contentContainer}>
 

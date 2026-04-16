@@ -5,7 +5,7 @@
 
 // Android emulator uses 10.0.2.2 to reach host machine localhost.
 // For a real device on the same network, change to your machine's LAN IP.
-export const BASE_URL = 'http://10.0.2.2:3000/api/v1';
+export const BASE_URL = 'http://192.168.1.80:3000/api/v1';
 
 let _token: string | null = null;
 
