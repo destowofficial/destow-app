@@ -190,10 +190,51 @@ export default function HomeScreen() {
             </View>
 
             {showDatePicker && (
-              <DateTimePicker value={date} mode="date" display="default" onChange={onDateChange} minimumDate={new Date()} />
+              Platform.OS === 'web' ? (
+                <TextInput
+                  type="date"
+                  style={styles.webPicker}
+                  value={date.toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    setDate(new Date((e as any).target.value));
+                    setShowDatePicker(false);
+                  }}
+                  onBlur={() => setShowDatePicker(false)}
+                />
+              ) : (
+                <DateTimePicker 
+                  value={date} 
+                  mode="date" 
+                  display={Platform.OS === 'ios' ? 'spinner' : 'calendar'} 
+                  onChange={onDateChange} 
+                  minimumDate={new Date()} 
+                />
+              )
             )}
+            
             {showTimePicker && (
-              <DateTimePicker value={time} mode="time" display="default" onChange={onTimeChange} />
+              Platform.OS === 'web' ? (
+                <TextInput
+                  type="time"
+                  style={styles.webPicker}
+                  value={formatTime(time)}
+                  onChange={(e) => {
+                    const [h, m] = (e as any).target.value.split(':');
+                    const newTime = new Date(time);
+                    newTime.setHours(parseInt(h), parseInt(m));
+                    setTime(newTime);
+                    setShowTimePicker(false);
+                  }}
+                  onBlur={() => setShowTimePicker(false)}
+                />
+              ) : (
+                <DateTimePicker 
+                  value={time} 
+                  mode="time" 
+                  display={Platform.OS === 'ios' ? 'spinner' : 'clock'} 
+                  onChange={onTimeChange} 
+                />
+              )
             )}
 
             <TouchableOpacity style={styles.searchButton} onPress={handleSearch} disabled={isSearching}>
@@ -442,5 +483,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: AppColors.brand,
     textAlign: 'center',
+  },
+  webPicker: {
+    backgroundColor: AppColors.background,
+    borderWidth: 1,
+    borderColor: AppColors.brand,
+    borderRadius: Radii.input,
+    padding: Spacing.sm,
+    marginBottom: Spacing.md,
+    fontSize: 16,
+    color: AppColors.brand,
   },
 });

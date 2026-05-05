@@ -8,7 +8,6 @@ import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '..
 import { Feather } from '@expo/vector-icons';
 import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
 import firebase from '../firebaseConfig';
-import { auth } from '../firebaseConfig';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
@@ -27,8 +26,9 @@ export default function LoginScreen() {
     setIsLoading(true);
     
     try {
+      // Use the firebase object from config
       const phoneProvider = new firebase.auth.PhoneAuthProvider();
-      const verificationId = await phoneProvider.verifyPhoneNumber(
+      const vId = await phoneProvider.verifyPhoneNumber(
         `+91${cleanPhone}`,
         recaptchaVerifier.current!
       );
@@ -39,7 +39,7 @@ export default function LoginScreen() {
         params: { 
           phone: cleanPhone, 
           name: name.trim(),
-          verificationId: verificationId
+          verificationId: vId
         } 
       });
     } catch (err: any) {
@@ -56,7 +56,7 @@ export default function LoginScreen() {
     >
       <FirebaseRecaptchaVerifierModal
         ref={recaptchaVerifier}
-        firebaseConfig={auth.app.options}
+        firebaseConfig={firebase.app().options}
         attemptInvisibleRetries={5}
       />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">

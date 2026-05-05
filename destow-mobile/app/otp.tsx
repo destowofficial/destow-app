@@ -9,7 +9,6 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { verifyOtp } from '../services/auth.service';
 import firebase from '../firebaseConfig';
-import { auth } from '../firebaseConfig';
 
 export default function OtpScreen() {
   const { phone, name, verificationId } = useLocalSearchParams<{ phone: string; name: string; verificationId: string }>();
@@ -31,7 +30,7 @@ export default function OtpScreen() {
       const credential = firebase.auth.PhoneAuthProvider.credential(verificationId, otp);
       
       // 2. Sign in with the credential
-      const userCredential = await auth.signInWithCredential(credential);
+      const userCredential = await firebase.auth().signInWithCredential(credential);
       
       // 3. Get the ID token from the authenticated user to send to the backend
       const idToken = await userCredential.user.getIdToken();
