@@ -1,27 +1,68 @@
-import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, Dimensions } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, Dimensions, ActivityIndicator, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
+import { useAuth } from '../../context/AuthContext';
+import { getUserHomeInfo } from '../../services/home.service';
+import { searchRoute } from '../../services/home.service';
 
 const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
+  const { user } = useAuth();
+  const [userName, setUserName] = useState(user?.name ?? '');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   
-  // Date/Time state
-  const [date, setDate] = useState(new Date(2026, 2, 16)); // Default 16/03/2026 for demo based on image
-  const [time, setTime] = useState(new Date(new Date().setHours(10, 0, 0, 0))); // Default 10:00 for demo
+  const [date, setDate] = useState(new Date());
+  const [time, setTime] = useState(new Date(new Date().setHours(10, 0, 0, 0)));
   
-  // Picker visibility state
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const handleBook = () => {
-    router.push('/cab-listing');
+  // Load real user info from backend
+  useEffect(() => {
+    (async () => {
+      try {
+        const info = await getUserHomeInfo();
+        if (info?.user?.name) setUserName(info.user.name);
+      } catch {
+        // If backend call fails (e.g. mock token), fall back to AuthContext name
+      }
+    })();
+  }, []);
+
+  const handleSearch = async () => {
+    if (!from.trim() || !to.trim()) {
+      Alert.alert('Missing Info', 'Please enter both origin and destination.');
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const dateStr = date.toISOString().split('T')[0]; // "YYYY-MM-DD"
+      const timeStr = formatTime(time); // "HH:MM"
+      const result = await searchRoute(from.trim(), to.trim(), dateStr, timeStr);
+      // Navigate to cab listing with search result params
+      router.push({
+        pathname: '/cab-listing',
+        params: {
+          from: result.from,
+          to: result.to,
+          date: dateStr,
+          time: timeStr,
+          distanceKm: String(result.distanceKm),
+          estimatedDurationHrs: String(result.estimatedDurationHrs),
+        },
+      });
+    } catch (e: any) {
+      Alert.alert('Search Failed', e?.message ?? 'Could not search cabs. Is the backend running?');
+    } finally {
+      setIsSearching(false);
+    }
   };
 
   const onDateChange = (event: any, selectedDate?: Date) => {
@@ -50,6 +91,9 @@ export default function HomeScreen() {
     });
   };
 
+  // Derive first name for greeting
+  const firstName = userName ? userName.split(' ')[0] : '…';
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContainer} bounces={false}>
@@ -66,9 +110,9 @@ export default function HomeScreen() {
               <View style={styles.headerContent}>
                 <View>
                   <Text style={styles.greetingLight}>Hello,</Text>
-                  <Text style={styles.greetingBold}>Rahul</Text>
+                  <Text style={styles.greetingBold}>{firstName}</Text>
                 </View>
-                {/* Placeholder for Profile Avatar */}
+                {/* Avatar placeholder */}
                 <View style={styles.avatarPlaceholder} />
               </View>
             </SafeAreaView>
@@ -146,14 +190,59 @@ export default function HomeScreen() {
             </View>
 
             {showDatePicker && (
-              <DateTimePicker value={date} mode="date" display="default" onChange={onDateChange} minimumDate={new Date()} />
+              Platform.OS === 'web' ? (
+                <TextInput
+                  type="date"
+                  style={styles.webPicker}
+                  value={date.toISOString().split('T')[0]}
+                  onChange={(e) => {
+                    setDate(new Date((e as any).target.value));
+                    setShowDatePicker(false);
+                  }}
+                  onBlur={() => setShowDatePicker(false)}
+                />
+              ) : (
+                <DateTimePicker 
+                  value={date} 
+                  mode="date" 
+                  display={Platform.OS === 'ios' ? 'spinner' : 'calendar'} 
+                  onChange={onDateChange} 
+                  minimumDate={new Date()} 
+                />
+              )
             )}
+            
             {showTimePicker && (
-              <DateTimePicker value={time} mode="time" display="default" onChange={onTimeChange} />
+              Platform.OS === 'web' ? (
+                <TextInput
+                  type="time"
+                  style={styles.webPicker}
+                  value={formatTime(time)}
+                  onChange={(e) => {
+                    const [h, m] = (e as any).target.value.split(':');
+                    const newTime = new Date(time);
+                    newTime.setHours(parseInt(h), parseInt(m));
+                    setTime(newTime);
+                    setShowTimePicker(false);
+                  }}
+                  onBlur={() => setShowTimePicker(false)}
+                />
+              ) : (
+                <DateTimePicker 
+                  value={time} 
+                  mode="time" 
+                  display={Platform.OS === 'ios' ? 'spinner' : 'clock'} 
+                  onChange={onTimeChange} 
+                />
+              )
             )}
 
-            <TouchableOpacity style={styles.searchButton} onPress={handleBook}>
-              <Text style={styles.searchButtonText}>Search Cabs</Text>
+            <TouchableOpacity style={styles.searchButton} onPress={handleSearch} disabled={isSearching}>
+              {isSearching ? (
+                <ActivityIndicator color={AppColors.background} />
+              ) : (
+                <Text style={styles.searchButtonText}>Search Cabs</Text>
+              )}
             </TouchableOpacity>
 
           </View>
@@ -199,7 +288,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xl * 2,
   },
   heroSection: {
-    height: 320, // Taller size to match image layout
+    height: 320,
     width: '100%',
     position: 'relative',
   },
@@ -208,7 +297,7 @@ const styles = StyleSheet.create({
   },
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)', // Slight dark overlay
+    backgroundColor: 'rgba(0,0,0,0.3)',
     paddingHorizontal: Spacing.lg,
   },
   headerContent: {
@@ -235,7 +324,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.7)',
   },
   searchCardWrapper: {
-    marginTop: -100, // Pull card up into hero section
+    marginTop: -100,
     paddingHorizontal: Spacing.lg,
     zIndex: 10,
   },
@@ -267,7 +356,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: AppColors.border,
     marginVertical: 4,
-    borderStyle: 'dashed', // Note: React Native dashed borders can be tricky without direct SVG, will use solid light grey if unsupported
   },
   swapIconContainer: {
     width: 24,
@@ -309,7 +397,7 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: AppColors.border,
     marginVertical: Spacing.md,
-    marginLeft: 30, // aligning with text roughly
+    marginLeft: 30,
   },
   dateTimeContainer: {
     flexDirection: 'row',
@@ -395,5 +483,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: AppColors.brand,
     textAlign: 'center',
+  },
+  webPicker: {
+    backgroundColor: AppColors.background,
+    borderWidth: 1,
+    borderColor: AppColors.brand,
+    borderRadius: Radii.input,
+    padding: Spacing.sm,
+    marginBottom: Spacing.md,
+    fontSize: 16,
+    color: AppColors.brand,
   },
 });

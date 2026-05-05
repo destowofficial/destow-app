@@ -1,0 +1,171 @@
+{
+  "info": {
+    "_postman_id": "destow-api-v1",
+    "name": "Destow API",
+    "description": "Complete Postman collection for the Destow intercity cab booking backend API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1", "type": "string" },
+    { "key": "token", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "🔑 Auth",
+      "item": [
+        {
+          "name": "Verify OTP (Phone Login)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firebaseIdToken\": \"YOUR_FIREBASE_ID_TOKEN_HERE\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/verify-otp", "host": ["{{baseUrl}}"], "path": ["auth", "verify-otp"] }
+          }
+        },
+        {
+          "name": "Google SSO",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firebaseIdToken\": \"YOUR_GOOGLE_FIREBASE_ID_TOKEN_HERE\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/google-sso", "host": ["{{baseUrl}}"], "path": ["auth", "google-sso"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "👤 Users",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users", "me"] }
+          }
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Saikumar\",\n  \"avatarUrl\": \"https://example.com/avatar.jpg\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏠 Home",
+      "item": [
+        {
+          "name": "Get User Info (Home Screen)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": { "raw": "{{baseUrl}}/home/user-info", "host": ["{{baseUrl}}"], "path": ["home", "user-info"] }
+          }
+        },
+        {
+          "name": "Search Route",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"date\": \"2026-04-20\",\n  \"time\": \"10:00\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/home/search", "host": ["{{baseUrl}}"], "path": ["home", "search"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🚕 Cabs",
+      "item": [
+        {
+          "name": "Get Available Cabs",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"date\": \"2026-04-20\",\n  \"time\": \"10:00\",\n  \"distanceKm\": 280\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cabs/available", "host": ["{{baseUrl}}"], "path": ["cabs", "available"] }
+          }
+        },
+        {
+          "name": "Book a Cab",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cabId\": \"REPLACE_WITH_CAB_UUID\",\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"pickupDatetime\": \"2026-04-20T10:00:00+05:30\",\n  \"distanceKm\": 280,\n  \"totalFare\": 3640,\n  \"paymentMethod\": \"upi\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cabs/book", "host": ["{{baseUrl}}"], "path": ["cabs", "book"] }
+          }
+        },
+        {
+          "name": "Process Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"bookingId\": \"REPLACE_WITH_BOOKING_UUID\",\n  \"method\": \"upi\",\n  \"transactionRef\": \"UPI-REF-123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/cabs/payment", "host": ["{{baseUrl}}"], "path": ["cabs", "payment"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📋 History",
+      "item": [
+        {
+          "name": "Get Trip History",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/history?page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["history"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "completed", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
