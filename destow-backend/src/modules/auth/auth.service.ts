@@ -1,89 +1,93 @@
-import { firebaseAuth } from '../../config/firebase.js';
 import { db } from '../../db/connection.js';
-import { users } from '../../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { users, otps } from '../../db/schema.js';
+import { eq, and, gt, desc } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
+import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 
-function signJwt(userId: string, firebaseUid: string) {
-  return jwt.sign({ userId, firebaseUid }, env.JWT_SECRET, {
+const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'ap-south-1' });
+
+function signJwt(userId: string) {
+  return jwt.sign({ userId }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
   });
 }
 
-// ─── Phone OTP Auth ─────────────────────────────────────────────────────────
-
-/**
- * Verifies a Firebase ID token obtained after OTP login on the mobile app.
- * Upserts the user in our DB, returns our JWT.
- */
-export async function verifyOtpToken(firebaseIdToken: string) {
-  const decoded = await firebaseAuth.verifyIdToken(firebaseIdToken);
-
-  if (!decoded.phone_number) {
-    throw new Error('No phone number associated with this Firebase token');
-  }
-
-  // Upsert user
-  const existing = await db
-    .select()
-    .from(users)
-    .where(eq(users.firebaseUid, decoded.uid))
-    .limit(1);
-
-  let user = existing[0];
-
-  if (!user) {
-    const [created] = await db
-      .insert(users)
-      .values({
-        firebaseUid: decoded.uid,
-        name: decoded.name ?? 'Destow User',
-        phone: decoded.phone_number,
-        authProvider: 'phone',
-      })
-      .returning();
-    user = created;
-  }
-
-  const token = signJwt(user.id, user.firebaseUid);
-  return { token, user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl } };
+function generateOtpCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// ─── Google SSO ──────────────────────────────────────────────────────────────
-
 /**
- * Verifies a Firebase ID token obtained after Google Sign-In on the mobile app.
+ * Normalizes phone number to +91 representation.
  */
-export async function verifyGoogleToken(firebaseIdToken: string) {
-  const decoded = await firebaseAuth.verifyIdToken(firebaseIdToken);
+function normalizePhone(phone: string) {
+  return phone.startsWith('+') ? phone : `+91${phone.replace(/\\D/g, '')}`;
+}
 
-  if (!decoded.email) {
-    throw new Error('No email associated with this Google account');
+export async function requestOtpToken(phone: string) {
+  const normalizedPhone = normalizePhone(phone);
+  const code = generateOtpCode();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
+  
+  await db.insert(otps).values({
+    phone: normalizedPhone,
+    code,
+    expiresAt
+  });
+  
+  try {
+     const command = new PublishCommand({
+       PhoneNumber: normalizedPhone,
+       Message: `Your Destow verification code is ${code}. It expires in 5 minutes.`
+     });
+     await snsClient.send(command);
+  } catch (err: any) {
+     console.error('AWS SNS Error:', err);
+     throw new Error('Failed to send OTP via SMS. Ensure AWS limits are adequate.');
   }
 
+  return { success: true, message: 'OTP sent successfully' };
+}
+
+export async function verifyOtpToken(phone: string, code: string) {
+  const normalizedPhone = normalizePhone(phone);
+  
+  const validOtps = await db
+    .select()
+    .from(otps)
+    .where(
+      and(
+        eq(otps.phone, normalizedPhone),
+        eq(otps.code, code),
+        gt(otps.expiresAt, new Date())
+      )
+    )
+    .orderBy(desc(otps.createdAt))
+    .limit(1);
+    
+  if (validOtps.length === 0) {
+    throw new Error('Invalid or expired OTP');
+  }
+  
   const existing = await db
     .select()
     .from(users)
-    .where(eq(users.firebaseUid, decoded.uid))
+    .where(eq(users.phone, normalizedPhone))
     .limit(1);
-
+    
   let user = existing[0];
-
+  
   if (!user) {
-    const [created] = await db
-      .insert(users)
-      .values({
-        firebaseUid: decoded.uid,
-        name: decoded.name ?? decoded.email.split('@')[0],
-        email: decoded.email,
-        avatarUrl: decoded.picture,
-        authProvider: 'google',
-      })
-      .returning();
+    const [created] = await db.insert(users).values({
+      phone: normalizedPhone,
+      name: 'Destow User',
+      authProvider: 'phone'
+    }).returning();
     user = created;
   }
-
-  const token = signJwt(user.id, user.firebaseUid);
-  return { token, user: { id: user.id, name: user.name, email: user.email, avatarUrl: user.avatarUrl } };
+  
+  await db.delete(otps).where(eq(otps.phone, normalizedPhone));
+  
+  const token = signJwt(user.id);
+  return { token, user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl } };
 }

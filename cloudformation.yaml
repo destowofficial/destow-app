@@ -1,0 +1,230 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for Destow Serverless Backend (API Gateway + Lambda)'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment name (e.g., dev, prod)
+  DBName:
+    Type: String
+    Default: destow
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]*$'
+    Description: PostgreSQL database name
+  DBUsername:
+    Type: String
+    Default: destow_admin
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]*$'
+    Description: PostgreSQL admin username
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    MaxLength: 41
+    AllowedPattern: '^[A-Za-z0-9]+$'
+    Description: PostgreSQL password. Use letters and numbers only.
+  JWTSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Secret used to sign JWT tokens.
+
+Resources:
+  # 0. Private network for Lambda + RDS
+  DestowVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'destow-vpc-${EnvironmentName}'
+
+  DestowPrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DestowVpc
+      CidrBlock: 10.42.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub 'destow-private-a-${EnvironmentName}'
+
+  DestowPrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DestowVpc
+      CidrBlock: 10.42.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub 'destow-private-b-${EnvironmentName}'
+
+  DestowLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Lambda to reach Destow PostgreSQL
+      VpcId: !Ref DestowVpc
+
+  DestowDatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow PostgreSQL from Destow Lambda only
+      VpcId: !Ref DestowVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref DestowLambdaSecurityGroup
+
+  DestowEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Lambda to reach AWS private service endpoints
+      VpcId: !Ref DestowVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref DestowLambdaSecurityGroup
+
+  DestowSnsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref DestowVpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.sns'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref DestowPrivateSubnetA
+        - !Ref DestowPrivateSubnetB
+      SecurityGroupIds:
+        - !Ref DestowEndpointSecurityGroup
+
+  DestowDatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for Destow PostgreSQL
+      SubnetIds:
+        - !Ref DestowPrivateSubnetA
+        - !Ref DestowPrivateSubnetB
+
+  DestowDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub 'destow-postgres-${EnvironmentName}'
+      Engine: postgres
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DestowDatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DestowDatabaseSecurityGroup
+
+  # 1. IAM Role for Lambda
+  DestowLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: DestowSnsPublish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: '*'
+
+  # 2. Lambda Function
+  DestowBackendFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'destow-backend-${EnvironmentName}'
+      Handler: dist/index.handler
+      Role: !GetAtt DestowLambdaExecutionRole.Arn
+      Code: ./destow-backend
+      Runtime: nodejs20.x
+      Timeout: 30
+      MemorySize: 512
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref DestowLambdaSecurityGroup
+        SubnetIds:
+          - !Ref DestowPrivateSubnetA
+          - !Ref DestowPrivateSubnetB
+      Environment:
+        Variables:
+          NODE_ENV: production
+          DATABASE_URL: !Sub 'postgres://${DBUsername}:${DBPassword}@${DestowDatabase.Endpoint.Address}:${DestowDatabase.Endpoint.Port}/${DBName}'
+          JWT_SECRET: !Ref JWTSecret
+          JWT_EXPIRES_IN: 7d
+
+  # 3. HTTP API Gateway (API Gateway v2)
+  DestowHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'destow-api-${EnvironmentName}'
+      ProtocolType: HTTP
+
+  # 4. API Gateway Integration with Lambda
+  DestowApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref DestowHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt DestowBackendFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  # 5. Catch-all Route for Express.js
+  DestowApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref DestowHttpApi
+      RouteKey: 'ANY /{proxy+}'
+      Target: !Join ['/', ['integrations', !Ref DestowApiIntegration]]
+
+  # 6. API Gateway Stage
+  DestowApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref DestowHttpApi
+      StageName: '$default'
+      AutoDeploy: true
+
+  # 7. Permission for API Gateway to invoke Lambda
+  DestowApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt DestowBackendFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${DestowHttpApi}/*/*/{proxy+}'
+
+Outputs:
+  ApiUrl:
+    Description: 'Base URL for the Destow Backend API'
+    Value: !Sub 'https://${DestowHttpApi}.execute-api.${AWS::Region}.amazonaws.com/'
+  LambdaFunctionName:
+    Description: 'Name of the Lambda function'
+    Value: !Ref DestowBackendFunction
+  DatabaseEndpoint:
+    Description: 'Private RDS PostgreSQL endpoint'
+    Value: !GetAtt DestowDatabase.Endpoint.Address

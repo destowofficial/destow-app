@@ -11,12 +11,14 @@ export interface UserProfile {
 }
 
 export async function getProfile(): Promise<UserProfile> {
-  return apiGet<UserProfile>('/users/me');
+  const result = await apiGet<{ user: UserProfile }>('/users/me');
+  return result.user;
 }
 
 export async function updateProfile(
   name: string,
   avatarUrl?: string,
 ): Promise<UserProfile> {
-  return apiPut<UserProfile>('/users/me', { name, avatarUrl });
+  const result = await apiPut<{ user: UserProfile }>('/users/me', { name, avatarUrl });
+  return result.user;
 }

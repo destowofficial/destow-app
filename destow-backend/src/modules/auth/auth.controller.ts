@@ -1,30 +1,30 @@
 import type { Context } from 'hono';
-import { verifyOtpToken, verifyGoogleToken } from './auth.service.js';
+import { requestOtpToken, verifyOtpToken } from './auth.service.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
 
-export async function verifyOtpController(c: Context) {
+export async function requestOtpController(c: Context) {
   try {
-    const { firebaseIdToken } = await c.req.json<{ firebaseIdToken: string }>();
-    if (!firebaseIdToken) return errorResponse(c, 'firebaseIdToken is required');
+    const { phone } = await c.req.json<{ phone: string }>();
+    if (!phone) return errorResponse(c, 'phone is required');
 
-    const result = await verifyOtpToken(firebaseIdToken);
+    const result = await requestOtpToken(phone);
     return successResponse(c, result);
   } catch (err: unknown) {
-    console.error('[auth/verify-otp]', err);
-    const message = err instanceof Error ? err.message : 'Authentication failed';
-    return errorResponse(c, message, 401);
+    console.error('[auth/request-otp]', err);
+    const message = err instanceof Error ? err.message : 'OTP request failed';
+    return errorResponse(c, message, 500);
   }
 }
 
-export async function googleSsoController(c: Context) {
+export async function verifyOtpController(c: Context) {
   try {
-    const { firebaseIdToken } = await c.req.json<{ firebaseIdToken: string }>();
-    if (!firebaseIdToken) return errorResponse(c, 'firebaseIdToken is required');
+    const { phone, code } = await c.req.json<{ phone: string; code: string }>();
+    if (!phone || !code) return errorResponse(c, 'phone and code are required');
 
-    const result = await verifyGoogleToken(firebaseIdToken);
+    const result = await verifyOtpToken(phone, code);
     return successResponse(c, result);
   } catch (err: unknown) {
-    console.error('[auth/google-sso]', err);
+    console.error('[auth/verify-otp]', err);
     const message = err instanceof Error ? err.message : 'Authentication failed';
     return errorResponse(c, message, 401);
   }

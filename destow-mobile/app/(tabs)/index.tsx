@@ -191,6 +191,7 @@ export default function HomeScreen() {
 
             {showDatePicker && (
               Platform.OS === 'web' ? (
+                // @ts-ignore
                 <TextInput
                   type="date"
                   style={styles.webPicker}
@@ -214,6 +215,7 @@ export default function HomeScreen() {
             
             {showTimePicker && (
               Platform.OS === 'web' ? (
+                // @ts-ignore
                 <TextInput
                   type="time"
                   style={styles.webPicker}

@@ -7,6 +7,9 @@ const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: false }
+    : undefined,
 });
 
 export const db = drizzle(pool, { schema });

@@ -1,5 +1,8 @@
 import { apiPost } from './api';
 
+import axios from 'axios';
+import { BASE_URL } from './api';
+
 export interface AuthUser {
   id: string;
   name: string;
@@ -14,16 +17,17 @@ export interface AuthResponse {
 }
 
 /**
- * Verifies a Firebase ID token (from phone OTP) with the backend.
- * Returns our own JWT + user info.
+ * Requests an OTP from the backend.
  */
-export async function verifyOtp(firebaseIdToken: string): Promise<AuthResponse> {
-  return apiPost<AuthResponse>('/auth/verify-otp', { firebaseIdToken });
+export async function requestOtp(phone: string): Promise<{ success: boolean; message: string }> {
+  const response = await axios.post<{ success: boolean; message: string }>(`${BASE_URL}/auth/request-otp`, { phone });
+  return response.data;
 }
 
 /**
- * Verifies a Firebase ID token (from Google Sign-In) with the backend.
+ * Verifies custom OTP token with the backend.
+ * Returns our own JWT + user info.
  */
-export async function googleSSO(firebaseIdToken: string): Promise<AuthResponse> {
-  return apiPost<AuthResponse>('/auth/google-sso', { firebaseIdToken });
+export async function verifyOtp(phone: string, code: string): Promise<AuthResponse> {
+  return apiPost<AuthResponse>('/auth/verify-otp', { phone, code });
 }

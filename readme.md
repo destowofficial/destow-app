@@ -30,13 +30,13 @@ The application focuses on **simplicity, performance, and mobile-friendly UI**.
 * JavaScript / TypeScript
 * Axios (API communication)
 
-## Backend (Planned / Future Integration)
+## Backend
 
-* Node.js
-* Express.js
-* PostgreSQL / MongoDB
-* Authentication (Cognito / Keycloak)
-* Authorization using Cerbos
+* Node.js (AWS Serverless API Gateway + Lambda)
+* Hono (Web Framework)
+* PostgreSQL via Drizzle ORM
+* Authentication: Custom OTP flow using AWS SNS
+* JWT-based Session Management
 
 ## DevOps & Tools
 
@@ -47,23 +47,30 @@ The application focuses on **simplicity, performance, and mobile-friendly UI**.
 
 ---
 
-# Mobile Application Architecture
+# Architecture (AWS Serverless)
+
+The backend has been migrated from a traditional Node/Express server to an **AWS Serverless Architecture**.
 
 ```
 Mobile App (React Native)
         │
         │ HTTPS API Calls
         ▼
-Backend API (Node.js / Express)
+AWS API Gateway (HTTP API)
         │
-        ├── Authentication Service
+        │ Proxies all requests
+        ▼
+AWS Lambda Function (Node.js 20.x)
         │
-        ├── Authorization Layer (Cerbos)
+        ├── index.ts (Hono wrapped with handle(app))
         │
-        ├── Database (PostgreSQL / MongoDB)
-        │
-        └── Notification Service (Push Notifications)
+        └── Database (PostgreSQL)
 ```
+
+## Why this Architecture?
+- **Zero Server Management**: No need to provision or maintain EC2 instances.
+- **Auto-scaling**: Automatically scales from 0 to thousands of concurrent requests.
+- **Cost-effective**: You only pay for the exact compute time used when users make API requests.
 
 ---
 
@@ -250,7 +257,6 @@ The application focuses on:
 
 Planned improvements:
 
-* User authentication
 * Agency dashboard
 * Booking system
 * Reviews and ratings
@@ -258,6 +264,42 @@ Planned improvements:
 * Advanced search filters
 * Push notifications
 * Admin panel
+
+---
+
+# AWS Deployment Workflow
+
+The backend application is configured for a fully automated deployment to AWS using CloudFormation.
+
+## 1. Local Bash Deployment (`deploy.sh`)
+
+You can deploy the entire AWS infrastructure directly from your terminal using the provided script.
+
+1. Ensure the **AWS CLI** is installed and configured (`aws configure`).
+2. Create an S3 Bucket in AWS (e.g., `destow-deployment-bucket`).
+3. Make the script executable and run it:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh -b your-s3-bucket-name
+```
+
+**What the script does:**
+1. Installs backend NPM dependencies.
+2. Runs `aws cloudformation package`, which automatically zips your `destow-backend` folder and uploads it to your S3 bucket.
+3. Runs `aws cloudformation deploy` to create/update your API Gateway and Lambda functions.
+4. Outputs the live **ApiUrl** which you can plug into your mobile app.
+
+## 2. CI/CD Deployment (GitHub Actions)
+
+We have also set up a GitHub Actions workflow (`.github/workflows/deploy.yml`).
+
+Every time you push code to the `main` branch, GitHub will automatically run the CloudFormation deployment.
+**Requirements:**
+Add the following secrets to your GitHub Repository Settings:
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEPLOYMENT_BUCKET`
 
 ---
 
@@ -291,7 +333,7 @@ Create a Pull Request on GitHub.
 * Search Results Screen
 * Agency Details Screen
 * Contact Screen
-* Login / Signup Screen (Future)
+* Login / OTP Verification Screen
 
 ---
 

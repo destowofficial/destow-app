@@ -1,0 +1,50 @@
+name: Deploy Destow Backend to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main # Trigger on push to main branch
+    paths:
+      - 'destow-backend/**'
+      - 'cloudformation.yaml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          cache-dependency-path: 'destow-backend/package-lock.json'
+
+      - name: Install Dependencies
+        working-directory: ./destow-backend
+        run: npm ci
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1 # Change to your preferred region
+
+      - name: Package CloudFormation Template
+        run: |
+          aws cloudformation package \
+            --template-file cloudformation.yaml \
+            --s3-bucket ${{ secrets.AWS_DEPLOYMENT_BUCKET }} \
+            --output-template-file packaged.yaml
+
+      - name: Deploy CloudFormation Stack
+        run: |
+          aws cloudformation deploy \
+            --template-file packaged.yaml \
+            --stack-name destow-serverless-stack \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides EnvironmentName=prod

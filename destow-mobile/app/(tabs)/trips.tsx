@@ -40,9 +40,9 @@ function TripCard({ booking }: { booking: Booking }) {
         </View>
         <View style={styles.footerItem}>
           <Feather name="credit-card" size={13} color={AppColors.textMuted} />
-          <Text style={styles.footerText}>{booking.paymentMethod.toUpperCase()}</Text>
+          <Text style={styles.footerText}>{(booking.paymentMethod ?? 'pending').toUpperCase()}</Text>
         </View>
-        <Text style={styles.fare}>₹{Math.round(parseFloat(booking.totalFare))}</Text>
+        <Text style={styles.fare}>₹{Math.round(parseFloat(booking.totalFare ?? '0'))}</Text>
       </View>
     </View>
   );
@@ -57,7 +57,7 @@ export default function TripsScreen() {
     (async () => {
       try {
         const data = await getTripHistory(1, 20);
-        setBookings(data.bookings);
+        setBookings(data?.bookings ?? []);
       } catch (e: any) {
         setError(e?.message ?? 'Could not load trips.');
       } finally {

@@ -8,10 +8,9 @@ import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '..
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { verifyOtp } from '../services/auth.service';
-import firebase from '../firebaseConfig';
 
 export default function OtpScreen() {
-  const { phone, name, verificationId } = useLocalSearchParams<{ phone: string; name: string; verificationId: string }>();
+  const { phone, name } = useLocalSearchParams<{ phone: string; name: string }>();
   const [otp, setOtp] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -26,17 +25,7 @@ export default function OtpScreen() {
     setIsLoading(true);
     
     try {
-      // 1. Create a credential using the verification ID and the code provided by the user
-      const credential = firebase.auth.PhoneAuthProvider.credential(verificationId, otp);
-      
-      // 2. Sign in with the credential
-      const userCredential = await firebase.auth().signInWithCredential(credential);
-      
-      // 3. Get the ID token from the authenticated user to send to the backend
-      const idToken = await userCredential.user.getIdToken();
-      
-      // 4. Send the ID token to our backend for verification and user upsert
-      const { token, user: backendUser } = await verifyOtp(idToken);
+      const { token, user: backendUser } = await verifyOtp(phone, otp);
       
       // 5. Complete login in our application context
       await login(token, backendUser);

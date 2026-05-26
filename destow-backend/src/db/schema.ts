@@ -4,12 +4,11 @@ import { sql } from 'drizzle-orm';
 // ─── Users ─────────────────────────────────────────────────────────────────
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  firebaseUid: text('firebase_uid').unique().notNull(),
   name: text('name').notNull(),
-  phone: text('phone').unique(),
+  phone: text('phone').unique().notNull(),
   email: text('email').unique(),
   avatarUrl: text('avatar_url'),
-  authProvider: text('auth_provider').notNull(), // 'phone' | 'google'
+  authProvider: text('auth_provider').notNull().default('phone'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -56,6 +55,15 @@ export const bookings = pgTable('bookings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+// ─── OTPs ───────────────────────────────────────────────────────────────────
+export const otps = pgTable('otps', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  phone: text('phone').notNull(),
+  code: text('code').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ─── Type Exports ──────────────────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -63,3 +71,5 @@ export type CabType = typeof cabTypes.$inferSelect;
 export type Cab = typeof cabs.$inferSelect;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
+export type Otp = typeof otps.$inferSelect;
+export type NewOtp = typeof otps.$inferInsert;

@@ -51,11 +51,19 @@ export async function getAvailableCabs(
   time: string,
   distanceKm: number,
 ): Promise<Cab[]> {
-  return apiPost<Cab[]>('/cabs/available', { from, to, date, time, distanceKm });
+  const result = await apiPost<{ cabs: Cab[] }>('/cabs/available', {
+    from,
+    to,
+    date,
+    time,
+    distanceKm,
+  });
+  return result.cabs;
 }
 
 export async function bookCab(payload: BookCabPayload): Promise<Booking> {
-  return apiPost<Booking>('/cabs/book', payload);
+  const result = await apiPost<{ booking: Booking }>('/cabs/book', payload);
+  return result.booking;
 }
 
 export async function processPayment(
@@ -63,5 +71,10 @@ export async function processPayment(
   method: string,
   transactionRef?: string,
 ): Promise<Booking> {
-  return apiPost<Booking>('/cabs/payment', { bookingId, method, transactionRef });
+  const result = await apiPost<{ booking: Booking }>('/cabs/payment', {
+    bookingId,
+    method,
+    transactionRef,
+  });
+  return result.booking;
 }

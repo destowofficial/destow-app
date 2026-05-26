@@ -4,8 +4,8 @@
  */
 
 // Android emulator uses 10.0.2.2 to reach host machine localhost.
-// For a real device on the same network, change to your machine's LAN IP.
-export const BASE_URL = 'http://192.168.1.80:3000/api/v1';
+// For a real device on the same network, change to your machine's LAN IP for local testing.
+export const BASE_URL = 'https://rsv8qga47c.execute-api.ap-south-1.amazonaws.com/api/v1';
 
 let _token: string | null = null;
 
@@ -35,7 +35,10 @@ export class ApiError extends Error {
 async function handleResponse<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new ApiError(res.status, (data as any)?.message ?? `HTTP ${res.status}`);
+    throw new ApiError(res.status, (data as any)?.message ?? (data as any)?.error ?? `HTTP ${res.status}`);
+  }
+  if (data && typeof data === 'object' && 'success' in data && 'data' in data) {
+    return (data as { data: T }).data;
   }
   return data as T;
 }

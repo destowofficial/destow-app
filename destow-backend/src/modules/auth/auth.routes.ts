@@ -1,18 +1,18 @@
 import { Hono } from 'hono';
-import { verifyOtpController, googleSsoController } from './auth.controller.js';
+import { requestOtpController, verifyOtpController } from './auth.controller.js';
 
 export const authRoutes = new Hono();
 
 /**
- * POST /api/v1/auth/verify-otp
- * Body: { firebaseIdToken: string }
- * Verifies Firebase phone OTP token, upserts user, returns our JWT.
+ * POST /api/v1/auth/request-otp
+ * Body: { phone: string }
+ * Generates OTP and sends via AWS SNS.
  */
-authRoutes.post('/verify-otp', verifyOtpController);
+authRoutes.post('/request-otp', requestOtpController);
 
 /**
- * POST /api/v1/auth/google-sso
- * Body: { firebaseIdToken: string }
- * Verifies Firebase Google token, upserts user, returns our JWT.
+ * POST /api/v1/auth/verify-otp
+ * Body: { phone: string, code: string }
+ * Verifies custom OTP token, upserts user, returns our JWT.
  */
-authRoutes.post('/google-sso', googleSsoController);
+authRoutes.post('/verify-otp', verifyOtpController);

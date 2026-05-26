@@ -1,5 +1,1 @@
-node_modules/
-dist/
-.env
-*.js.map
-drizzle/
+node_modules

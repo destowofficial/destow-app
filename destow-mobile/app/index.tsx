@@ -6,15 +6,14 @@ import {
 import { router } from 'expo-router';
 import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../constants/design-tokens';
 import { Feather } from '@expo/vector-icons';
-import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
-import firebase from '../firebaseConfig';
+import { requestOtp } from '../services/auth.service';
 
 export default function LoginScreen() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
+
 
   const handleSendOTP = async () => {
     const cleanPhone = phone.replace(/\D/g, '');
@@ -26,20 +25,14 @@ export default function LoginScreen() {
     setIsLoading(true);
     
     try {
-      // Use the firebase object from config
-      const phoneProvider = new firebase.auth.PhoneAuthProvider();
-      const vId = await phoneProvider.verifyPhoneNumber(
-        `+91${cleanPhone}`,
-        recaptchaVerifier.current!
-      );
+      await requestOtp(cleanPhone);
       
       setIsLoading(false);
       router.push({ 
         pathname: '/otp', 
         params: { 
           phone: cleanPhone, 
-          name: name.trim(),
-          verificationId: vId
+          name: name.trim()
         } 
       });
     } catch (err: any) {
@@ -54,11 +47,6 @@ export default function LoginScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <FirebaseRecaptchaVerifierModal
-        ref={recaptchaVerifier}
-        firebaseConfig={firebase.app().options}
-        attemptInvisibleRetries={5}
-      />
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }} keyboardShouldPersistTaps="handled">
         <View style={styles.contentContainer}>
 
