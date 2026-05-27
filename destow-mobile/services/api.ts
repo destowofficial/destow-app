@@ -5,7 +5,7 @@
 
 // Android emulator uses 10.0.2.2 to reach host machine localhost.
 // For a real device on the same network, change to your machine's LAN IP for local testing.
-export const BASE_URL = 'https://rsv8qga47c.execute-api.ap-south-1.amazonaws.com/api/v1';
+export const BASE_URL = 'https://9b4zm11ds4.execute-api.ap-south-1.amazonaws.com/api/v1';
 
 let _token: string | null = null;
 

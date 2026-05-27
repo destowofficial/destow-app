@@ -36,7 +36,7 @@ export default function LoginScreen() {
         } 
       });
     } catch (err: any) {
-      console.error('Firebase Auth Error:', err);
+      console.error('OTP request error:', err);
       setError(err.message || 'Failed to send OTP. Please try again.');
       setIsLoading(false);
     }

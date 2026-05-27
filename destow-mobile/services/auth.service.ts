@@ -1,8 +1,5 @@
 import { apiPost } from './api';
 
-import axios from 'axios';
-import { BASE_URL } from './api';
-
 export interface AuthUser {
   id: string;
   name: string;
@@ -20,8 +17,7 @@ export interface AuthResponse {
  * Requests an OTP from the backend.
  */
 export async function requestOtp(phone: string): Promise<{ success: boolean; message: string }> {
-  const response = await axios.post<{ success: boolean; message: string }>(`${BASE_URL}/auth/request-otp`, { phone });
-  return response.data;
+  return apiPost<{ success: boolean; message: string }>('/auth/request-otp', { phone });
 }
 
 /**
