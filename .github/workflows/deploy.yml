@@ -21,11 +21,12 @@ jobs:
         with:
           node-version: '20.x'
           cache: 'npm'
-          cache-dependency-path: 'destow-backend/package-lock.json'
+          cache-dependency-path: 'package-lock.json'
 
-      - name: Install Dependencies
-        working-directory: ./destow-backend
-        run: npm ci
+      - name: Install and Build Backend
+        run: |
+          npm ci
+          npx turbo run build --filter=destow-backend
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4

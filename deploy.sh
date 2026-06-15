@@ -60,10 +60,8 @@ echo -e "\033[1;36m==============================================\033[0m"
 
 # 1. Install dependencies
 echo -e "\n\033[1;33m[1/4] Installing and building backend dependencies...\033[0m"
-cd destow-backend
 npm install
-npm run build
-cd ..
+npx turbo run build --filter=destow-backend
 
 # 2. Package the CloudFormation template
 echo -e "\n\033[1;33m[2/4] Packaging and uploading code to S3 bucket ($S3_BUCKET)...\033[0m"
