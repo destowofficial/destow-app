@@ -158,9 +158,9 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub 'destow-backend-${EnvironmentName}'
-      Handler: dist/index.handler
+      Handler: index.handler
       Role: !GetAtt DestowLambdaExecutionRole.Arn
-      Code: ./destow-backend
+      Code: ./apps/api/dist
       Runtime: nodejs20.x
       Timeout: 30
       MemorySize: 512
