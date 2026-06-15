@@ -27,3 +27,6 @@ Thumbs.db
 # Deployment packages
 *.zip
 packaged.yaml
+
+# Turborepo cache
+.turbo/
