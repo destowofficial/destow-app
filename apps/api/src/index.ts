@@ -5,6 +5,11 @@ import { logger } from 'hono/logger';
 import { handle } from 'hono/aws-lambda';
 import { env } from './config/env.js';
 import { appErrorHandler } from './lib/errors.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
+import { usersRoutes } from './modules/users/users.routes.js';
+import { homeRoutes } from './modules/home/home.routes.js';
+import { cabsRoutes } from './modules/cabs/cabs.routes.js';
+import { historyRoutes } from './modules/history/history.routes.js';
 
 const app = new Hono();
 
@@ -21,9 +26,12 @@ app.use('*', cors({ origin: corsOrigin, allowMethods: ['GET', 'POST', 'PUT', 'DE
 app.get('/', (c) => c.json({ status: 'ok', service: 'Destow API', version: '1.0.0' }));
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-// ─── API Routes ───────────────────────────────────────────────────────────────
-// Feature modules are mounted here as each is built. Migrations run as a deploy/CI
-// step (npm run db:migrate), not on the request path.
+// ─── API Routes (migrations run as a deploy step, not on the request path) ────
+app.route('/api/v1/auth', authRoutes);
+app.route('/api/v1/users', usersRoutes);
+app.route('/api/v1/home', homeRoutes);
+app.route('/api/v1/cabs', cabsRoutes);
+app.route('/api/v1/history', historyRoutes);
 
 // ─── 404 + Error Handlers ─────────────────────────────────────────────────────
 app.notFound((c) => c.json({ success: false, error: 'Route not found', code: 'not_found' }, 404));
@@ -37,7 +45,7 @@ if (
   !process.env.LAMBDA_TASK_ROOT
 ) {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
-    console.log(`\nDestow API running at http://localhost:${info.port}`);
+    console.log(`\n Destow API running at http://localhost:${info.port}`);
   });
 }
 

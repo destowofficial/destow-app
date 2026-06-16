@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
-import { vehicleTypes, platformSettings } from './schema.js';
+import { users, serviceProviders, vehicles, vehicleTypes, platformSettings } from './schema.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -21,6 +21,48 @@ export async function seedDatabase(db: Db): Promise<void> {
       { category: 'bus', name: 'Tempo Traveller', seats: 12, bags: 12, refPricePerKmPaise: 2500 },
       { category: 'bus', name: 'AC Sleeper Bus', seats: 36, bags: 30, refPricePerKmPaise: 4000 },
     ]);
+  }
+
+  // Demo service provider + fleet so /cabs/available returns vehicles in dev.
+  const existingProvider = await db
+    .select({ id: serviceProviders.id })
+    .from(serviceProviders)
+    .limit(1);
+  if (existingProvider.length === 0) {
+    const allTypes = await db.select().from(vehicleTypes);
+    const typeId = (name: string) => allTypes.find((t) => t.name === name)?.id;
+
+    const [owner] = await db
+      .insert(users)
+      .values({ name: 'Demo Agency Owner', phone: '+919000000001', role: 'provider' })
+      .returning();
+    const [provider] = await db
+      .insert(serviceProviders)
+      .values({ ownerUserId: owner.id, agencyName: 'Destow Partner Travels', status: 'approved' })
+      .returning();
+
+    const fleet = [
+      { type: 'Sedan', pricePerKmPaise: 1300, registrationNo: 'DL01AB1234', modelName: 'Honda City' },
+      { type: 'SUV', pricePerKmPaise: 2000, registrationNo: 'DL01AB5678', modelName: 'Toyota Innova' },
+      { type: 'Tempo Traveller', pricePerKmPaise: 2500, registrationNo: 'DL01CD9012', modelName: 'Force Traveller' },
+    ];
+    const rows = fleet
+      .map((v) => {
+        const vehicleTypeId = typeId(v.type);
+        return vehicleTypeId
+          ? {
+              serviceProviderId: provider.id,
+              vehicleTypeId,
+              pricePerKmPaise: v.pricePerKmPaise,
+              registrationNo: v.registrationNo,
+              modelName: v.modelName,
+              status: 'approved' as const,
+              isActive: true,
+            }
+          : null;
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+    if (rows.length) await db.insert(vehicles).values(rows);
   }
 }
 
