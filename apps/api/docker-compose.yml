@@ -1,19 +1,49 @@
-version: '3.8'
+# Local Postgres for the Destow backend.
+# Drizzle migrations own the schema — no init SQL is mounted (avoids the legacy init-db.sql collision).
+# Ports avoid the host's postgresql@18 (5433) and the conventional 5432.
+#
+#   Dev DB:   docker compose up -d db                     → localhost:5434/destow
+#   Test DB:  docker compose --profile test up -d db-test → localhost:5435/destow_test (ephemeral)
+#   Stop:     docker compose down            (add -v to wipe the dev volume)
+name: destow
 
 services:
   db:
-    image: postgres:15
-    container_name: destow-postgres
-    restart: always
+    image: postgres:16-alpine
+    container_name: destow-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: destow
+      POSTGRES_PASSWORD: destow_local
       POSTGRES_DB: destow
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - destow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U destow -d destow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Isolated, ephemeral DB for integration tests (data on tmpfs → fast, wiped on restart).
+  db-test:
+    image: postgres:16-alpine
+    container_name: destow-db-test
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: destow
+      POSTGRES_PASSWORD: destow_local
+      POSTGRES_DB: destow_test
+    ports:
+      - "5435:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U destow -d destow_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
-  postgres_data:
+  destow_pgdata:

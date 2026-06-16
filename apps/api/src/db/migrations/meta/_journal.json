@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1776151797140,
-      "tag": "0000_aspiring_firelord",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1778412178149,
-      "tag": "0001_lean_wither",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1778412374499,
-      "tag": "0002_high_whizzer",
+      "when": 1781633757120,
+      "tag": "0000_marketplace_init",
       "breakpoints": true
     }
   ]
