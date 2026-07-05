@@ -1,4 +1,4 @@
-import 'dotenv/config';
+// Bun loads .env automatically — no dotenv needed.
 import { z } from 'zod';
 
 export const envSchema = z.object({
