@@ -32,8 +32,21 @@ services:
       S3_BUCKET: destow-dev
       S3_ACCESS_KEY: minioadmin
       S3_SECRET_KEY: minioadmin
+    # No host port — the gateway is the only public entry point.
+
+  # Gateway (Caddy) — every request enters here and is proxied to the API.
+  gateway:
+    image: caddy:2-alpine
+    container_name: destow-gateway
+    restart: unless-stopped
+    depends_on:
+      - api
     ports:
-      - "3000:3000"
+      - "3000:80" # all API traffic enters here (mobile emulator: 10.0.2.2:3000)
+      # - "443:443" # prod HTTPS with the Destow domain
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - destow_caddy:/data
 
   db:
     image: postgres:16-alpine
@@ -103,3 +116,4 @@ services:
 volumes:
   destow_pgdata:
   destow_minio:
+  destow_caddy:
