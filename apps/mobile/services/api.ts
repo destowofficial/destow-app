@@ -3,9 +3,14 @@
  * Uses the global auth token set via setAuthToken().
  */
 
-// Android emulator uses 10.0.2.2 to reach host machine localhost.
-// For a real device on the same network, change to your machine's LAN IP for local testing.
-export const BASE_URL = 'https://9b4zm11ds4.execute-api.ap-south-1.amazonaws.com/api/v1';
+// Prod default = the deployed API Gateway (ap-south-1 / Mumbai).
+// For local testing set EXPO_PUBLIC_API_URL in apps/mobile/.env:
+//   Android emulator → http://10.0.2.2:3000/api/v1   (10.0.2.2 reaches host localhost)
+//   iOS simulator    → http://localhost:3000/api/v1
+//   real device      → http://<your-LAN-IP>:3000/api/v1
+export const BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ??
+  'https://9b4zm11ds4.execute-api.ap-south-1.amazonaws.com/api/v1';
 
 let _token: string | null = null;
 

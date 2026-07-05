@@ -1,0 +1,10 @@
+# Keep the Docker build context small and free of host artifacts.
+**/node_modules
+**/dist
+**/.turbo
+**/.expo
+**/.env
+.git
+.github
+apps/mobile
+docs

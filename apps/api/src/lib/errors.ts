@@ -1,10 +1,10 @@
-import type { Context } from 'hono';
+import type { Request, Response, NextFunction } from 'express';
 import type { ErrorCode } from '@destow/contracts';
 
 type HttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503;
 
-// Typed application error. Services throw it; the global handler maps it to the
-// standard envelope. Avoids ad-hoc `throw new Error(...)` with lost status/code.
+// Typed application error. Services throw it; the Express error handler maps it
+// to the standard envelope. Avoids ad-hoc `throw new Error(...)`.
 export class AppError extends Error {
   readonly status: HttpErrorStatus;
   readonly code: ErrorCode;
@@ -41,19 +41,18 @@ export class AppError extends Error {
   }
 }
 
-// Hono global error handler — single place the envelope is built for errors.
-export function appErrorHandler(err: Error, c: Context) {
+// Express error-handling middleware (must keep 4 args). Single place the error
+// envelope is built. Express 5 forwards rejected async handlers here.
+export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
   if (err instanceof AppError) {
-    return c.json(
-      {
-        success: false,
-        error: err.message,
-        code: err.code,
-        ...(err.details !== undefined ? { details: err.details } : {}),
-      },
-      err.status,
-    );
+    res.status(err.status).json({
+      success: false,
+      error: err.message,
+      code: err.code,
+      ...(err.details !== undefined ? { details: err.details } : {}),
+    });
+    return;
   }
   console.error('[Unhandled Error]', err);
-  return c.json({ success: false, error: 'Internal server error', code: 'internal' }, 500);
+  res.status(500).json({ success: false, error: 'Internal server error', code: 'internal' });
 }
