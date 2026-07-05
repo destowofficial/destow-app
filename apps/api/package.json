@@ -9,6 +9,8 @@
     "build": "rm -rf dist && tsc --noEmit && esbuild src/index.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.mjs --external:pg-native --external:@aws-sdk/* '--banner:js=import{createRequire}from\"module\";const require=createRequire(import.meta.url);'",
     "start": "node dist/index.mjs",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio"
@@ -17,6 +19,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@destow/contracts": "*",
     "@aws-sdk/client-sns": "^3.1045.0",
     "@hono/node-server": "^1.13.7",
     "cors": "^2.8.6",
@@ -36,6 +39,7 @@
     "drizzle-kit": "^0.30.6",
     "esbuild": "^0.25.0",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9"
   }
 }
