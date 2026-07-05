@@ -1,4 +1,4 @@
-// Shared enum value sets — the single source of truth used by:
+// Shared enum value sets - the single source of truth used by:
 //   - the DB (Drizzle pgEnum)         e.g. pgEnum('booking_status', BOOKING_STATUS)
 //   - request/response validation     e.g. z.enum(BOOKING_STATUS)
 //   - clients (typed unions)          e.g. BookingStatus

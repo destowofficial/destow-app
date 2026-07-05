@@ -24,7 +24,7 @@ import {
   TRIP_TYPE,
 } from '@destow/contracts';
 
-// ─── Enums (values are the single source of truth in @destow/contracts) ───────
+// --- Enums (values are the single source of truth in @destow/contracts) -------
 export const userRoleEnum = pgEnum('user_role', USER_ROLE);
 export const customerTypeEnum = pgEnum('customer_type', CUSTOMER_TYPE);
 export const providerStatusEnum = pgEnum('provider_status', PROVIDER_STATUS);
@@ -44,7 +44,7 @@ const timestamps = {
     .$onUpdate(() => new Date()),
 };
 
-// ─── Users (customers, providers, admins) ─────────────────────────────────────
+// --- Users (customers, providers, admins) -------------------------------------
 export const users = pgTable(
   'users',
   {
@@ -63,7 +63,7 @@ export const users = pgTable(
   (t) => [index('users_role_idx').on(t.role)],
 );
 
-// ─── Service providers (agencies / fleet owners) ──────────────────────────────
+// --- Service providers (agencies / fleet owners) ------------------------------
 export const serviceProviders = pgTable(
   'service_providers',
   {
@@ -76,7 +76,7 @@ export const serviceProviders = pgTable(
     status: providerStatusEnum('status').notNull().default('pending'),
     payoutMethod: text('payout_method'), // 'bank' | 'upi'
     payoutDetails: jsonb('payout_details'),
-    commissionBpsOverride: integer('commission_bps_override'), // null → platform default
+    commissionBpsOverride: integer('commission_bps_override'), // null -> platform default
     ratingSum: integer('rating_sum').notNull().default(0),
     ratingCount: integer('rating_count').notNull().default(0),
     ...timestamps,
@@ -87,7 +87,7 @@ export const serviceProviders = pgTable(
   ],
 );
 
-// ─── Vehicle types (catalog: Sedan/SUV/Mini/Tempo/AC-Sleeper…) ────────────────
+// --- Vehicle types (catalog: Sedan/SUV/Mini/Tempo/AC-Sleeper...) ----------------
 export const vehicleTypes = pgTable(
   'vehicle_types',
   {
@@ -103,7 +103,7 @@ export const vehicleTypes = pgTable(
   (t) => [index('vehicle_types_category_idx').on(t.category)],
 );
 
-// ─── Vehicles (provider inventory) ────────────────────────────────────────────
+// --- Vehicles (provider inventory) --------------------------------------------
 export const vehicles = pgTable(
   'vehicles',
   {
@@ -125,7 +125,7 @@ export const vehicles = pgTable(
   ],
 );
 
-// ─── Drivers (provider roster; details snapshotted onto a booking) ────────────
+// --- Drivers (provider roster; details snapshotted onto a booking) ------------
 export const drivers = pgTable(
   'drivers',
   {
@@ -140,7 +140,7 @@ export const drivers = pgTable(
   (t) => [index('drivers_provider_idx').on(t.serviceProviderId)],
 );
 
-// ─── Bookings (the core; money in integer paise, distance in integer metres) ──
+// --- Bookings (the core; money in integer paise, distance in integer metres) --
 export const bookings = pgTable(
   'bookings',
   {
@@ -160,7 +160,7 @@ export const bookings = pgTable(
     tripType: tripTypeEnum('trip_type').notNull().default('one_way'),
     pickupDatetime: timestamp('pickup_datetime', { withTimezone: true }).notNull(),
     returnDatetime: timestamp('return_datetime', { withTimezone: true }),
-    // ── Fare snapshot (frozen at creation so config changes never rewrite history) ──
+    // -- Fare snapshot (frozen at creation so config changes never rewrite history) --
     pricePerKmPaise: integer('price_per_km_paise').notNull(),
     totalFarePaise: integer('total_fare_paise').notNull(),
     commissionBps: integer('commission_bps').notNull(),
@@ -183,16 +183,16 @@ export const bookings = pgTable(
   ],
 );
 
-// ─── Platform settings (single row; admin-managed commission etc.) ────────────
+// --- Platform settings (single row; admin-managed commission etc.) ------------
 export const platformSettings = pgTable('platform_settings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  commissionBps: integer('commission_bps').notNull().default(1800), // 18%, clamp 1500–2000
+  commissionBps: integer('commission_bps').notNull().default(1800), // 18%, clamp 1500-2000
   mapsProvider: text('maps_provider').notNull().default('google'),
   updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-// ─── Ratings (one per booking; feeds provider rating) ─────────────────────────
+// --- Ratings (one per booking; feeds provider rating) -------------------------
 export const ratings = pgTable(
   'ratings',
   {
@@ -201,7 +201,7 @@ export const ratings = pgTable(
     customerUserId: uuid('customer_user_id').references(() => users.id).notNull(),
     serviceProviderId: uuid('service_provider_id').references(() => serviceProviders.id).notNull(),
     vehicleId: uuid('vehicle_id').references(() => vehicles.id),
-    rating: integer('rating').notNull(), // 1–5 (enforced in app)
+    rating: integer('rating').notNull(), // 1-5 (enforced in app)
     comment: text('comment'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -211,7 +211,7 @@ export const ratings = pgTable(
   ],
 );
 
-// ─── OTPs (hardened: hashed code, attempt counter, indexed phone) ─────────────
+// --- OTPs (hardened: hashed code, attempt counter, indexed phone) -------------
 export const otps = pgTable(
   'otps',
   {
@@ -226,7 +226,7 @@ export const otps = pgTable(
   (t) => [index('otps_phone_expires_idx').on(t.phone, t.expiresAt)],
 );
 
-// ─── Relations (for relational queries / joins) ───────────────────────────────
+// --- Relations (for relational queries / joins) -------------------------------
 export const usersRelations = relations(users, ({ many, one }) => ({
   bookings: many(bookings),
   providerProfile: one(serviceProviders, {
@@ -283,7 +283,7 @@ export const ratingsRelations = relations(ratings, ({ one }) => ({
   }),
 }));
 
-// ─── Inferred types ───────────────────────────────────────────────────────────
+// --- Inferred types -----------------------------------------------------------
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type ServiceProvider = typeof serviceProviders.$inferSelect;

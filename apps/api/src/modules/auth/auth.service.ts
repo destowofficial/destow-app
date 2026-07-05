@@ -55,8 +55,8 @@ export async function requestOtp(rawPhone: string) {
       throw new AppError(502, 'internal', 'Failed to send OTP SMS');
     }
   } else {
-    // Local/dev: no SMS — log the code so login works without a provider.
-    console.log(`\n📲  [DEV OTP] ${phone} → ${code}\n`);
+    // Local/dev: no SMS - log the code so login works without a provider.
+    console.log(`\n[DEV OTP] ${phone} -> ${code}\n`);
   }
 
   return {
@@ -78,7 +78,7 @@ export async function verifyOtp(rawPhone: string, code: string) {
 
   if (!otp) throw AppError.unauthorized('Invalid or expired OTP');
   if (otp.attempts >= MAX_ATTEMPTS) {
-    throw AppError.rateLimited('Too many attempts — request a new OTP');
+    throw AppError.rateLimited('Too many attempts - request a new OTP');
   }
 
   const expected = Buffer.from(otp.codeHash, 'hex');

@@ -11,7 +11,7 @@ export interface FareBreakdown {
 
 // The single place fare + commission are computed. Pure, integer-paise, server-side.
 // total_fare   = price_per_km * distance
-// commission   = total_fare * commission_rate   (rate clamped to 15–20%)
+// commission   = total_fare * commission_rate   (rate clamped to 15-20%)
 // payout       = total_fare - commission
 export function computeFare(params: {
   pricePerKmPaise: number;

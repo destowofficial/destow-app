@@ -22,12 +22,12 @@ export function metresToKm(metres: number): number {
   return metres / 1000;
 }
 
-// Commission rate (basis points) is always clamped to the business range 15–20%.
+// Commission rate (basis points) is always clamped to the business range 15-20%.
 export function clampCommissionBps(bps: number): number {
   return Math.min(MAX_COMMISSION_BPS, Math.max(MIN_COMMISSION_BPS, Math.round(bps)));
 }
 
-// Format integer paise as an INR string, e.g. 381250 → "₹3,812.50".
+// Format integer paise as an INR string, e.g. 381250 -> "₹3,812.50".
 export function formatPaise(paise: number): string {
   const rupees = paise / RUPEE_PAISE;
   return (

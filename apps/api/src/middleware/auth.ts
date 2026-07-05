@@ -35,7 +35,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   next();
 }
 
-// Role gate — use after requireAuth: router.use(requireAuth, requireRole('admin')).
+// Role gate - use after requireAuth: router.use(requireAuth, requireRole('admin')).
 export function requireRole(...roles: UserRole[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {

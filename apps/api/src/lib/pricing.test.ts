@@ -10,7 +10,7 @@ describe('computeFare', () => {
     expect(f.commissionPaise + f.providerPayoutPaise).toBe(f.totalFarePaise);
   });
 
-  it('clamps commission to the 15–20% range', () => {
+  it('clamps commission to the 15-20% range', () => {
     expect(computeFare({ pricePerKmPaise: 1000, distanceM: 100_000, commissionBps: 500 }).commissionBps).toBe(1500);
     expect(computeFare({ pricePerKmPaise: 1000, distanceM: 100_000, commissionBps: 9000 }).commissionBps).toBe(2000);
   });

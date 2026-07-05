@@ -70,7 +70,7 @@ export async function seedDatabase(db: Db): Promise<void> {
 async function run() {
   const { db, pool } = await import('./connection.js');
   await seedDatabase(db);
-  console.log('✅ Database seeded');
+  console.log('Database seeded');
   await pool.end();
 }
 
