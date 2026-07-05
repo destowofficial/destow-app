@@ -1,15 +1,14 @@
 import crypto from 'node:crypto';
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
-import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
 import { db } from '../../db/connection.js';
 import { users, otps } from '../../db/schema.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
+import { sms } from '../../lib/sms.js';
 
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ATTEMPTS = 5;
-const snsClient = new SNSClient({ region: env.AWS_REGION });
 
 function normalizePhone(phone: string): string {
   return phone.startsWith('+') ? phone : `+91${phone.replace(/\D/g, '')}`;
@@ -39,24 +38,12 @@ export async function requestOtp(rawPhone: string) {
   await db.delete(otps).where(eq(otps.phone, phone));
   await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
 
-  if (env.NODE_ENV === 'production') {
-    try {
-      await snsClient.send(
-        new PublishCommand({
-          PhoneNumber: phone,
-          Message: `Your Destow verification code is ${code}. It expires in 5 minutes.`,
-          MessageAttributes: {
-            'AWS.SNS.SMS.SMSType': { DataType: 'String', StringValue: 'Transactional' },
-          },
-        }),
-      );
-    } catch (err) {
-      console.error('[auth] SNS send failed', err);
-      throw new AppError(502, 'internal', 'Failed to send OTP SMS');
-    }
-  } else {
-    // Local/dev: no SMS - log the code so login works without a provider.
-    console.log(`\n[DEV OTP] ${phone} -> ${code}\n`);
+  // Delivery goes through the SmsProvider adapter (SNS in prod, dev-log locally).
+  try {
+    await sms.sendOtp(phone, code);
+  } catch (err) {
+    console.error('[auth] SMS send failed', err);
+    throw new AppError(502, 'internal', 'Failed to send OTP SMS');
   }
 
   return {
