@@ -15,7 +15,7 @@ function normalizePhone(phone: string): string {
   return phone.startsWith('+') ? phone : `+91${phone.replace(/\D/g, '')}`;
 }
 
-// OTPs are stored hashed (HMAC-SHA256), never in plaintext.
+// OTPs are stored hashed (HMAC-SHA256), never plaintext.
 function hashOtp(phone: string, code: string): string {
   return crypto.createHmac('sha256', env.JWT_SECRET).update(`${phone}:${code}`).digest('hex');
 }
@@ -35,7 +35,7 @@ export async function requestOtp(rawPhone: string) {
   const code = generateOtpCode();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
-  // Keep a single active OTP per phone.
+  // One active OTP per phone.
   await db.delete(otps).where(eq(otps.phone, phone));
   await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
 
@@ -55,14 +55,13 @@ export async function requestOtp(rawPhone: string) {
       throw new AppError(502, 'internal', 'Failed to send OTP SMS');
     }
   } else {
-    // Local/dev: no SMS — log the code so you can complete login on the emulator.
+    // Local/dev: no SMS — log the code so login works without a provider.
     console.log(`\n📲  [DEV OTP] ${phone} → ${code}\n`);
   }
 
   return {
     success: true,
     message: 'OTP sent',
-    // Dev convenience only — never present in production.
     ...(env.NODE_ENV !== 'production' ? { devCode: code } : {}),
   };
 }
@@ -82,11 +81,10 @@ export async function verifyOtp(rawPhone: string, code: string) {
     throw AppError.rateLimited('Too many attempts — request a new OTP');
   }
 
-  // Constant-time compare.
   const expected = Buffer.from(otp.codeHash, 'hex');
   const actual = Buffer.from(hashOtp(phone, code), 'hex');
-  const ok = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-  if (!ok) {
+  const okMatch = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  if (!okMatch) {
     await db.update(otps).set({ attempts: otp.attempts + 1 }).where(eq(otps.id, otp.id));
     throw AppError.unauthorized('Invalid or expired OTP');
   }
@@ -103,6 +101,6 @@ export async function verifyOtp(rawPhone: string, code: string) {
 
   return {
     token: signJwt(user.id),
-    user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl },
+    user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl, role: user.role },
   };
 }

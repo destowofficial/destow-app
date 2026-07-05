@@ -1,18 +1,7 @@
-import { Hono } from 'hono';
+import express from 'express';
 import { requestOtpController, verifyOtpController } from './auth.controller.js';
 
-export const authRoutes = new Hono();
+export const authRouter: express.Router = express.Router();
 
-/**
- * POST /api/v1/auth/request-otp
- * Body: { phone: string }
- * Generates OTP and sends via AWS SNS.
- */
-authRoutes.post('/request-otp', requestOtpController);
-
-/**
- * POST /api/v1/auth/verify-otp
- * Body: { phone: string, code: string }
- * Verifies custom OTP token, upserts user, returns our JWT.
- */
-authRoutes.post('/verify-otp', verifyOtpController);
+authRouter.post('/request-otp', requestOtpController);
+authRouter.post('/verify-otp', verifyOtpController);
