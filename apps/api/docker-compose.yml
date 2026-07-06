@@ -1,19 +1,119 @@
-version: '3.8'
+# Local Postgres for the Destow backend.
+# Drizzle migrations own the schema — no init SQL is mounted (avoids the legacy init-db.sql collision).
+# Ports avoid the host's postgresql@18 (5433) and the conventional 5432.
+#
+#   Full stack: docker compose up -d --build        → API on localhost:3000 + DB
+#   Dev DB only: docker compose up -d db             → localhost:5434/destow
+#   Test DB:     docker compose --profile test up -d db-test → localhost:5435/destow_test
+#   Stop:        docker compose down                 (add -v to wipe the dev volume)
+name: destow
 
 services:
-  db:
-    image: postgres:15
-    container_name: destow-postgres
-    restart: always
+  # API container (Bun + Express) — local testing only; prod runs the same code on a VPS/ECS.
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    container_name: destow-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgres://destow:destow_local@db:5432/destow
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local_dev_jwt_secret_at_least_32_characters_long
+      JWT_EXPIRES_IN: 7d
+      AWS_REGION: ap-south-1
+      CORS_ORIGINS: "*"
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: destow-dev
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+    # No host port — the gateway is the only public entry point.
+
+  # Gateway (Caddy) — every request enters here and is proxied to the API.
+  gateway:
+    image: caddy:2-alpine
+    container_name: destow-gateway
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:80" # all API traffic enters here (mobile emulator: 10.0.2.2:3000)
+      # - "443:443" # prod HTTPS with the Destow domain
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - destow_caddy:/data
+
+  db:
+    image: postgres:16-alpine
+    container_name: destow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: destow
+      POSTGRES_PASSWORD: destow_local
       POSTGRES_DB: destow
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - destow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U destow -d destow"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Isolated, ephemeral DB for integration tests (data on tmpfs → fast, wiped on restart).
+  db-test:
+    image: postgres:16-alpine
+    container_name: destow-db-test
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: destow
+      POSTGRES_PASSWORD: destow_local
+      POSTGRES_DB: destow_test
+    ports:
+      - "5435:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U destow -d destow_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Redis — real-time pub/sub + cache (used from the real-time phase).
+  redis:
+    image: redis:7-alpine
+    container_name: destow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # MinIO — S3-compatible object storage for KYC docs / vehicle photos (dev).
+  minio:
+    image: minio/minio
+    container_name: destow-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # console
+    volumes:
+      - destow_minio:/data
 
 volumes:
-  postgres_data:
+  destow_pgdata:
+  destow_minio:
+  destow_caddy:

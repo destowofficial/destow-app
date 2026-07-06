@@ -1,0 +1,10 @@
+# Destow gateway - the single entry point. Every request enters here and is
+# proxied to the API. Caddy passes WebSocket upgrades through transparently,
+# so REST and Socket.io both work.
+#
+# Local: listens on :80 (mapped to host :3000). No TLS locally.
+# Prod:  replace ":80" with "api.destow.com" and Caddy auto-provisions HTTPS.
+:80 {
+	encode gzip
+	reverse_proxy api:3000
+}

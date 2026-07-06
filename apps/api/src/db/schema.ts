@@ -1,75 +1,303 @@
-import { pgTable, uuid, text, numeric, boolean, integer, timestamp } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
+import {
+  pgTable,
+  pgEnum,
+  uuid,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  jsonb,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
+import { sql, relations } from 'drizzle-orm';
+import {
+  USER_ROLE,
+  CUSTOMER_TYPE,
+  PROVIDER_STATUS,
+  VEHICLE_CATEGORY,
+  VEHICLE_STATUS,
+  DRIVER_STATUS,
+  BOOKING_STATUS,
+  PAYMENT_STATUS,
+  PAYMENT_METHOD,
+  TRIP_TYPE,
+} from '@destow/contracts';
 
-// ─── Users ─────────────────────────────────────────────────────────────────
-export const users = pgTable('users', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  name: text('name').notNull(),
-  phone: text('phone').unique().notNull(),
-  email: text('email').unique(),
-  avatarUrl: text('avatar_url'),
-  authProvider: text('auth_provider').notNull().default('phone'),
+// --- Enums (values are the single source of truth in @destow/contracts) -------
+export const userRoleEnum = pgEnum('user_role', USER_ROLE);
+export const customerTypeEnum = pgEnum('customer_type', CUSTOMER_TYPE);
+export const providerStatusEnum = pgEnum('provider_status', PROVIDER_STATUS);
+export const vehicleCategoryEnum = pgEnum('vehicle_category', VEHICLE_CATEGORY);
+export const vehicleStatusEnum = pgEnum('vehicle_status', VEHICLE_STATUS);
+export const driverStatusEnum = pgEnum('driver_status', DRIVER_STATUS);
+export const bookingStatusEnum = pgEnum('booking_status', BOOKING_STATUS);
+export const paymentStatusEnum = pgEnum('payment_status', PAYMENT_STATUS);
+export const paymentMethodEnum = pgEnum('payment_method', PAYMENT_METHOD);
+export const tripTypeEnum = pgEnum('trip_type', TRIP_TYPE);
+
+const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull()
+    .$onUpdate(() => new Date()),
+};
+
+// --- Users (customers, providers, admins) -------------------------------------
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    name: text('name').notNull(),
+    phone: text('phone').unique().notNull(),
+    email: text('email').unique(),
+    avatarUrl: text('avatar_url'),
+    role: userRoleEnum('role').notNull().default('customer'),
+    customerType: customerTypeEnum('customer_type').notNull().default('individual'),
+    companyName: text('company_name'), // B2B
+    gstin: text('gstin'), // B2B
+    authProvider: text('auth_provider').notNull().default('phone'),
+    ...timestamps,
+  },
+  (t) => [index('users_role_idx').on(t.role)],
+);
+
+// --- Service providers (agencies / fleet owners) ------------------------------
+export const serviceProviders = pgTable(
+  'service_providers',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    ownerUserId: uuid('owner_user_id').references(() => users.id).notNull(),
+    agencyName: text('agency_name').notNull(),
+    contactPhone: text('contact_phone'),
+    contactEmail: text('contact_email'),
+    gstin: text('gstin'),
+    status: providerStatusEnum('status').notNull().default('pending'),
+    payoutMethod: text('payout_method'), // 'bank' | 'upi'
+    payoutDetails: jsonb('payout_details'),
+    commissionBpsOverride: integer('commission_bps_override'), // null -> platform default
+    ratingSum: integer('rating_sum').notNull().default(0),
+    ratingCount: integer('rating_count').notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [
+    index('providers_owner_idx').on(t.ownerUserId),
+    index('providers_status_idx').on(t.status),
+  ],
+);
+
+// --- Vehicle types (catalog: Sedan/SUV/Mini/Tempo/AC-Sleeper...) ----------------
+export const vehicleTypes = pgTable(
+  'vehicle_types',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    category: vehicleCategoryEnum('category').notNull(),
+    name: text('name').notNull(),
+    seats: integer('seats').notNull(),
+    bags: integer('bags').notNull(),
+    imageKey: text('image_key'),
+    refPricePerKmPaise: integer('ref_price_per_km_paise'), // reference only
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('vehicle_types_category_idx').on(t.category)],
+);
+
+// --- Vehicles (provider inventory) --------------------------------------------
+export const vehicles = pgTable(
+  'vehicles',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    serviceProviderId: uuid('service_provider_id').references(() => serviceProviders.id).notNull(),
+    vehicleTypeId: uuid('vehicle_type_id').references(() => vehicleTypes.id).notNull(),
+    registrationNo: text('registration_no'),
+    modelName: text('model_name'),
+    pricePerKmPaise: integer('price_per_km_paise').notNull(), // provider's actual rate
+    amenities: jsonb('amenities'),
+    status: vehicleStatusEnum('status').notNull().default('pending'),
+    isActive: boolean('is_active').notNull().default(true),
+    ...timestamps,
+  },
+  (t) => [
+    index('vehicles_provider_idx').on(t.serviceProviderId),
+    index('vehicles_type_idx').on(t.vehicleTypeId),
+    index('vehicles_available_idx').on(t.status, t.isActive), // availability listing
+  ],
+);
+
+// --- Drivers (provider roster; details snapshotted onto a booking) ------------
+export const drivers = pgTable(
+  'drivers',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    serviceProviderId: uuid('service_provider_id').references(() => serviceProviders.id).notNull(),
+    name: text('name').notNull(),
+    phone: text('phone').notNull(),
+    licenseNo: text('license_no'),
+    status: driverStatusEnum('status').notNull().default('active'),
+    ...timestamps,
+  },
+  (t) => [index('drivers_provider_idx').on(t.serviceProviderId)],
+);
+
+// --- Bookings (the core; money in integer paise, distance in integer metres) --
+export const bookings = pgTable(
+  'bookings',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    customerUserId: uuid('customer_user_id').references(() => users.id).notNull(),
+    serviceProviderId: uuid('service_provider_id').references(() => serviceProviders.id).notNull(),
+    vehicleId: uuid('vehicle_id').references(() => vehicles.id).notNull(),
+    vehicleTypeId: uuid('vehicle_type_id').references(() => vehicleTypes.id).notNull(),
+    driverId: uuid('driver_id').references(() => drivers.id),
+    driverName: text('driver_name'), // snapshot at assignment
+    driverPhone: text('driver_phone'), // snapshot at assignment
+    fromLocation: text('from_location').notNull(),
+    toLocation: text('to_location').notNull(),
+    fromCity: text('from_city'),
+    toCity: text('to_city'),
+    distanceM: integer('distance_m').notNull(), // metres
+    tripType: tripTypeEnum('trip_type').notNull().default('one_way'),
+    pickupDatetime: timestamp('pickup_datetime', { withTimezone: true }).notNull(),
+    returnDatetime: timestamp('return_datetime', { withTimezone: true }),
+    // -- Fare snapshot (frozen at creation so config changes never rewrite history) --
+    pricePerKmPaise: integer('price_per_km_paise').notNull(),
+    totalFarePaise: integer('total_fare_paise').notNull(),
+    commissionBps: integer('commission_bps').notNull(),
+    commissionPaise: integer('commission_paise').notNull(),
+    providerPayoutPaise: integer('provider_payout_paise').notNull(),
+    status: bookingStatusEnum('status').notNull().default('pending'),
+    paymentStatus: paymentStatusEnum('payment_status').notNull().default('pending'),
+    paymentMethod: paymentMethodEnum('payment_method'),
+    transactionRef: text('transaction_ref'),
+    ...timestamps,
+  },
+  (t) => [
+    // history listing for a customer (keyset/limit pagination)
+    index('bookings_customer_created_idx').on(t.customerUserId, t.createdAt),
+    // provider's incoming/active bookings
+    index('bookings_provider_status_idx').on(t.serviceProviderId, t.status),
+    index('bookings_vehicle_idx').on(t.vehicleId),
+    index('bookings_status_idx').on(t.status),
+    index('bookings_payment_status_idx').on(t.paymentStatus),
+  ],
+);
+
+// --- Platform settings (single row; admin-managed commission etc.) ------------
+export const platformSettings = pgTable('platform_settings', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  commissionBps: integer('commission_bps').notNull().default(1800), // 18%, clamp 1500-2000
+  mapsProvider: text('maps_provider').notNull().default('google'),
+  updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
-// ─── Cab Types ─────────────────────────────────────────────────────────────
-export const cabTypes = pgTable('cab_types', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  name: text('name').notNull(),       // 'Sedan' | 'SUV' | 'Mini'
-  seats: integer('seats').notNull(),
-  bags: integer('bags').notNull(),
-  imageKey: text('image_key'),        // asset filename or S3 key
-  pricePerKm: numeric('price_per_km', { precision: 8, scale: 2 }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+// --- Ratings (one per booking; feeds provider rating) -------------------------
+export const ratings = pgTable(
+  'ratings',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    bookingId: uuid('booking_id').references(() => bookings.id, { onDelete: 'cascade' }).notNull(),
+    customerUserId: uuid('customer_user_id').references(() => users.id).notNull(),
+    serviceProviderId: uuid('service_provider_id').references(() => serviceProviders.id).notNull(),
+    vehicleId: uuid('vehicle_id').references(() => vehicles.id),
+    rating: integer('rating').notNull(), // 1-5 (enforced in app)
+    comment: text('comment'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('ratings_booking_uidx').on(t.bookingId),
+    index('ratings_provider_idx').on(t.serviceProviderId),
+  ],
+);
 
-// ─── Cabs (vendor inventory) ────────────────────────────────────────────────
-export const cabs = pgTable('cabs', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  agencyName: text('agency_name').notNull(),
-  cabTypeId: uuid('cab_type_id').references(() => cabTypes.id).notNull(),
-  driverName: text('driver_name'),
-  driverPhone: text('driver_phone'),
-  isActive: boolean('is_active').default(true).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+// --- OTPs (hardened: hashed code, attempt counter, indexed phone) -------------
+export const otps = pgTable(
+  'otps',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    phone: text('phone').notNull(),
+    codeHash: text('code_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('otps_phone_expires_idx').on(t.phone, t.expiresAt)],
+);
 
-// ─── Bookings ──────────────────────────────────────────────────────────────
-export const bookings = pgTable('bookings', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
-  cabId: uuid('cab_id').references(() => cabs.id).notNull(),
-  fromLocation: text('from_location').notNull(),
-  toLocation: text('to_location').notNull(),
-  pickupDatetime: timestamp('pickup_datetime', { withTimezone: true }).notNull(),
-  distanceKm: numeric('distance_km', { precision: 8, scale: 2 }),
-  totalFare: numeric('total_fare', { precision: 10, scale: 2 }),
-  status: text('status').default('pending').notNull(),
-  // 'pending' | 'confirmed' | 'completed' | 'cancelled'
-  paymentMethod: text('payment_method'),   // 'upi' | 'card' | 'cash'
-  paymentStatus: text('payment_status').default('pending').notNull(),
-  // 'pending' | 'paid' | 'failed'
-  transactionRef: text('transaction_ref'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
+// --- Relations (for relational queries / joins) -------------------------------
+export const usersRelations = relations(users, ({ many, one }) => ({
+  bookings: many(bookings),
+  providerProfile: one(serviceProviders, {
+    fields: [users.id],
+    references: [serviceProviders.ownerUserId],
+  }),
+}));
 
-// ─── OTPs ───────────────────────────────────────────────────────────────────
-export const otps = pgTable('otps', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  phone: text('phone').notNull(),
-  code: text('code').notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const serviceProvidersRelations = relations(serviceProviders, ({ one, many }) => ({
+  owner: one(users, { fields: [serviceProviders.ownerUserId], references: [users.id] }),
+  vehicles: many(vehicles),
+  drivers: many(drivers),
+  bookings: many(bookings),
+}));
 
-// ─── Type Exports ──────────────────────────────────────────────────────────
+export const vehicleTypesRelations = relations(vehicleTypes, ({ many }) => ({
+  vehicles: many(vehicles),
+}));
+
+export const vehiclesRelations = relations(vehicles, ({ one }) => ({
+  provider: one(serviceProviders, {
+    fields: [vehicles.serviceProviderId],
+    references: [serviceProviders.id],
+  }),
+  type: one(vehicleTypes, { fields: [vehicles.vehicleTypeId], references: [vehicleTypes.id] }),
+}));
+
+export const driversRelations = relations(drivers, ({ one }) => ({
+  provider: one(serviceProviders, {
+    fields: [drivers.serviceProviderId],
+    references: [serviceProviders.id],
+  }),
+}));
+
+export const bookingsRelations = relations(bookings, ({ one }) => ({
+  customer: one(users, { fields: [bookings.customerUserId], references: [users.id] }),
+  provider: one(serviceProviders, {
+    fields: [bookings.serviceProviderId],
+    references: [serviceProviders.id],
+  }),
+  vehicle: one(vehicles, { fields: [bookings.vehicleId], references: [vehicles.id] }),
+  vehicleType: one(vehicleTypes, {
+    fields: [bookings.vehicleTypeId],
+    references: [vehicleTypes.id],
+  }),
+  driver: one(drivers, { fields: [bookings.driverId], references: [drivers.id] }),
+}));
+
+export const ratingsRelations = relations(ratings, ({ one }) => ({
+  booking: one(bookings, { fields: [ratings.bookingId], references: [bookings.id] }),
+  provider: one(serviceProviders, {
+    fields: [ratings.serviceProviderId],
+    references: [serviceProviders.id],
+  }),
+}));
+
+// --- Inferred types -----------------------------------------------------------
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
-export type CabType = typeof cabTypes.$inferSelect;
-export type Cab = typeof cabs.$inferSelect;
+export type ServiceProvider = typeof serviceProviders.$inferSelect;
+export type NewServiceProvider = typeof serviceProviders.$inferInsert;
+export type VehicleType = typeof vehicleTypes.$inferSelect;
+export type NewVehicleType = typeof vehicleTypes.$inferInsert;
+export type Vehicle = typeof vehicles.$inferSelect;
+export type NewVehicle = typeof vehicles.$inferInsert;
+export type Driver = typeof drivers.$inferSelect;
+export type NewDriver = typeof drivers.$inferInsert;
 export type Booking = typeof bookings.$inferSelect;
 export type NewBooking = typeof bookings.$inferInsert;
+export type PlatformSetting = typeof platformSettings.$inferSelect;
+export type Rating = typeof ratings.$inferSelect;
+export type NewRating = typeof ratings.$inferInsert;
 export type Otp = typeof otps.$inferSelect;
 export type NewOtp = typeof otps.$inferInsert;

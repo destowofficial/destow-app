@@ -30,3 +30,6 @@ packaged.yaml
 
 # Turborepo cache
 .turbo/
+
+# Claude Code (local, not shared)
+.claude/

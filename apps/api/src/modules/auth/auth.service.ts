@@ -1,93 +1,93 @@
+import crypto from 'node:crypto';
+import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import jwt from 'jsonwebtoken';
 import { db } from '../../db/connection.js';
 import { users, otps } from '../../db/schema.js';
-import { eq, and, gt, desc } from 'drizzle-orm';
-import jwt from 'jsonwebtoken';
 import { env } from '../../config/env.js';
-import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
+import { AppError } from '../../lib/errors.js';
+import { sms } from '../../lib/sms.js';
 
-const snsClient = new SNSClient({ region: process.env.AWS_REGION || 'ap-south-1' });
+const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_ATTEMPTS = 5;
 
-function signJwt(userId: string) {
+function normalizePhone(phone: string): string {
+  return phone.startsWith('+') ? phone : `+91${phone.replace(/\D/g, '')}`;
+}
+
+// OTPs are stored hashed (HMAC-SHA256), never plaintext.
+function hashOtp(phone: string, code: string): string {
+  return crypto.createHmac('sha256', env.JWT_SECRET).update(`${phone}:${code}`).digest('hex');
+}
+
+function generateOtpCode(): string {
+  return crypto.randomInt(100_000, 1_000_000).toString(); // crypto RNG, 6 digits
+}
+
+function signJwt(userId: string): string {
   return jwt.sign({ userId }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
   });
 }
 
-function generateOtpCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-/**
- * Normalizes phone number to +91 representation.
- */
-function normalizePhone(phone: string) {
-  return phone.startsWith('+') ? phone : `+91${phone.replace(/\\D/g, '')}`;
-}
-
-export async function requestOtpToken(phone: string) {
-  const normalizedPhone = normalizePhone(phone);
+export async function requestOtp(rawPhone: string) {
+  const phone = normalizePhone(rawPhone);
   const code = generateOtpCode();
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
-  
-  await db.insert(otps).values({
-    phone: normalizedPhone,
-    code,
-    expiresAt
-  });
-  
+  const expiresAt = new Date(Date.now() + OTP_TTL_MS);
+
+  // One active OTP per phone.
+  await db.delete(otps).where(eq(otps.phone, phone));
+  await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
+
+  // Delivery goes through the SmsProvider adapter (SNS in prod, dev-log locally).
   try {
-     const command = new PublishCommand({
-       PhoneNumber: normalizedPhone,
-       Message: `Your Destow verification code is ${code}. It expires in 5 minutes.`
-     });
-     await snsClient.send(command);
-  } catch (err: any) {
-     console.error('AWS SNS Error:', err);
-     throw new Error('Failed to send OTP via SMS. Ensure AWS limits are adequate.');
+    await sms.sendOtp(phone, code);
+  } catch (err) {
+    console.error('[auth] SMS send failed', err);
+    throw new AppError(502, 'internal', 'Failed to send OTP SMS');
   }
 
-  return { success: true, message: 'OTP sent successfully' };
+  return {
+    success: true,
+    message: 'OTP sent',
+    ...(env.NODE_ENV !== 'production' ? { devCode: code } : {}),
+  };
 }
 
-export async function verifyOtpToken(phone: string, code: string) {
-  const normalizedPhone = normalizePhone(phone);
-  
-  const validOtps = await db
+export async function verifyOtp(rawPhone: string, code: string) {
+  const phone = normalizePhone(rawPhone);
+
+  const [otp] = await db
     .select()
     .from(otps)
-    .where(
-      and(
-        eq(otps.phone, normalizedPhone),
-        eq(otps.code, code),
-        gt(otps.expiresAt, new Date())
-      )
-    )
+    .where(and(eq(otps.phone, phone), gt(otps.expiresAt, new Date()), isNull(otps.consumedAt)))
     .orderBy(desc(otps.createdAt))
     .limit(1);
-    
-  if (validOtps.length === 0) {
-    throw new Error('Invalid or expired OTP');
+
+  if (!otp) throw AppError.unauthorized('Invalid or expired OTP');
+  if (otp.attempts >= MAX_ATTEMPTS) {
+    throw AppError.rateLimited('Too many attempts - request a new OTP');
   }
-  
-  const existing = await db
-    .select()
-    .from(users)
-    .where(eq(users.phone, normalizedPhone))
-    .limit(1);
-    
-  let user = existing[0];
-  
+
+  const expected = Buffer.from(otp.codeHash, 'hex');
+  const actual = Buffer.from(hashOtp(phone, code), 'hex');
+  const okMatch = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  if (!okMatch) {
+    await db.update(otps).set({ attempts: otp.attempts + 1 }).where(eq(otps.id, otp.id));
+    throw AppError.unauthorized('Invalid or expired OTP');
+  }
+
+  await db.update(otps).set({ consumedAt: new Date() }).where(eq(otps.id, otp.id));
+
+  let [user] = await db.select().from(users).where(eq(users.phone, phone)).limit(1);
   if (!user) {
-    const [created] = await db.insert(users).values({
-      phone: normalizedPhone,
-      name: 'Destow User',
-      authProvider: 'phone'
-    }).returning();
-    user = created;
+    [user] = await db
+      .insert(users)
+      .values({ phone, name: 'Destow User', authProvider: 'phone' })
+      .returning();
   }
-  
-  await db.delete(otps).where(eq(otps.phone, normalizedPhone));
-  
-  const token = signJwt(user.id);
-  return { token, user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl } };
+
+  return {
+    token: signJwt(user.id),
+    user: { id: user.id, name: user.name, phone: user.phone, avatarUrl: user.avatarUrl, role: user.role },
+  };
 }
