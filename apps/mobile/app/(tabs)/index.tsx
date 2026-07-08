@@ -1,499 +1,288 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Image, Dimensions, ActivityIndicator, Alert } from 'react-native';
-import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
-import { useAuth } from '../../context/AuthContext';
-import { getUserHomeInfo } from '../../services/home.service';
-import { searchRoute } from '../../services/home.service';
+import { colors } from '../../theme/colors';
+import { typography } from '../../theme/typography';
+import { spacing, radii, shadows } from '../../theme/spacing';
+import { SearchCard } from '../../components/cards/SearchCard';
+import { PopularRouteCard } from '../../components/cards/PopularRouteCard';
+import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
+import { fetchPopularRoutes } from '../../services/api';
+import type { PopularRoute } from '../../services/types';
+import { useBookingStore } from '../../stores/useBookingStore';
 
-const { width } = Dimensions.get('window');
+export default function Home() {
+  const router = useRouter();
+  const [popularRoutes, setPopularRoutes] = useState<PopularRoute[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { fromCity, toCity, setFromCity, setToCity } = useBookingStore();
 
-export default function HomeScreen() {
-  const { user } = useAuth();
-  const [userName, setUserName] = useState(user?.name ?? '');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  
-  const [date, setDate] = useState(new Date());
-  const [time, setTime] = useState(new Date(new Date().setHours(10, 0, 0, 0)));
-  
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-
-  // Load real user info from backend
   useEffect(() => {
-    (async () => {
-      try {
-        const info = await getUserHomeInfo();
-        if (info?.user?.name) setUserName(info.user.name);
-      } catch {
-        // If backend call fails (e.g. mock token), fall back to AuthContext name
-      }
-    })();
+    loadPopularRoutes();
   }, []);
 
-  const handleSearch = async () => {
-    if (!from.trim() || !to.trim()) {
-      Alert.alert('Missing Info', 'Please enter both origin and destination.');
-      return;
-    }
-    setIsSearching(true);
-    try {
-      const dateStr = date.toISOString().split('T')[0]; // "YYYY-MM-DD"
-      const timeStr = formatTime(time); // "HH:MM"
-      const result = await searchRoute(from.trim(), to.trim(), dateStr, timeStr);
-      // Navigate to cab listing with search result params
-      router.push({
-        pathname: '/cab-listing',
-        params: {
-          from: result.from,
-          to: result.to,
-          date: dateStr,
-          time: timeStr,
-          distanceKm: String(result.distanceKm),
-          estimatedDurationHrs: String(result.estimatedDurationHrs),
-        },
-      });
-    } catch (e: any) {
-      Alert.alert('Search Failed', e?.message ?? 'Could not search cabs. Is the backend running?');
-    } finally {
-      setIsSearching(false);
-    }
+  const loadPopularRoutes = async () => {
+    setLoading(true);
+    const { data } = await fetchPopularRoutes();
+    setPopularRoutes(data);
+    setLoading(false);
   };
-
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    if (Platform.OS === 'android') setShowDatePicker(false);
-    if (selectedDate) setDate(selectedDate);
-  };
-
-  const onTimeChange = (event: any, selectedTime?: Date) => {
-    if (Platform.OS === 'android') setShowTimePicker(false);
-    if (selectedTime) setTime(selectedTime);
-  };
-
-  const formatDate = (dateObj: Date) => {
-    return dateObj.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  const formatTime = (timeObj: Date) => {
-    return timeObj.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-  };
-
-  // Derive first name for greeting
-  const firstName = userName ? userName.split(' ')[0] : '…';
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} bounces={false}>
-        
-        {/* Header Hero Section */}
-        <View style={styles.heroSection}>
-          <Image 
-             source={require('../../assets/images/wallpaper.jpg')}
-            style={styles.heroImage} 
-            resizeMode="cover" 
-          />
-          <View style={styles.heroOverlay}>
-            <SafeAreaView edges={['top']}>
-              <View style={styles.headerContent}>
-                <View>
-                  <Text style={styles.greetingLight}>Hello,</Text>
-                  <Text style={styles.greetingBold}>{firstName}</Text>
-                </View>
-                {/* Avatar placeholder */}
-                <View style={styles.avatarPlaceholder} />
-              </View>
-            </SafeAreaView>
-          </View>
-        </View>
-
-        {/* Floating Search Card */}
-        <View style={styles.searchCardWrapper}>
-          <View style={styles.searchCard}>
-            
-            {/* Route Timeline */}
-            <View style={styles.routeContainer}>
-              <View style={styles.timelineColumn}>
-                <View style={[styles.dot, {backgroundColor: AppColors.brand}]} />
-                <View style={styles.line} />
-                <View style={styles.swapIconContainer}>
-                  <Feather name="repeat" size={14} color={AppColors.brand} />
-                </View>
-                <View style={styles.line} />
-                <View style={[styles.dot, {backgroundColor: AppColors.error}]} />
-              </View>
-              
-              <View style={styles.locationsColumn}>
-                <View style={styles.locationInput}>
-                  <Text style={styles.locationLabel}>LEAVING FROM</Text>
-                  <View style={styles.locationRow}>
-                    <Feather name="map-pin" size={18} color={AppColors.brand} style={styles.locationIcon} />
-                    <TextInput 
-                      style={styles.locationInputText}
-                      placeholder="Delhi"
-                      placeholderTextColor={AppColors.brand}
-                      value={from}
-                      onChangeText={setFrom}
-                      selectionColor={AppColors.brand}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.locationDivider} />
-
-                <View style={styles.locationInput}>
-                  <Text style={styles.locationLabel}>GOING TO</Text>
-                  <View style={styles.locationRow}>
-                    <Feather name="map-pin" size={18} color={AppColors.error} style={styles.locationIcon} />
-                    <TextInput 
-                      style={styles.locationInputText}
-                      placeholder="Jaipur"
-                      placeholderTextColor={AppColors.brand}
-                      value={to}
-                      onChangeText={setTo}
-                      selectionColor={AppColors.brand}
-                    />
-                  </View>
-                </View>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <LinearGradient
+          colors={colors.primary.gradient as any}
+          style={styles.header}
+        >
+          <View style={styles.headerRow}>
+            <View style={styles.headerLeft}>
+              <Image
+                source={require('../../assets/logo.png')}
+                style={styles.headerLogo}
+                resizeMode="contain"
+              />
+              <View>
+                <Text style={styles.headerTitle}>DESTOW</Text>
+                <Text style={styles.headerSubtitle}>Your Journey Awaits</Text>
               </View>
             </View>
-
-            {/* Date and Time Pickers */}
-            <View style={styles.dateTimeContainer}>
-              <View style={styles.dateTimeBlock}>
-                <Text style={styles.dateTimeLabel}>PICKUP DATE</Text>
-                <TouchableOpacity style={styles.pickerButton} onPress={() => setShowDatePicker(true)}>
-                  <Feather name="calendar" size={18} color={AppColors.brand} />
-                  <Text style={styles.pickerText}>{formatDate(date)}</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.dateTimeBlock}>
-                <Text style={styles.dateTimeLabel}>PICKUP TIME</Text>
-                <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTimePicker(true)}>
-                  <Feather name="clock" size={18} color={AppColors.brand} />
-                  <Text style={styles.pickerText}>{formatTime(time)}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {showDatePicker && (
-              Platform.OS === 'web' ? (
-                // @ts-ignore
-                <TextInput
-                  type="date"
-                  style={styles.webPicker}
-                  value={date.toISOString().split('T')[0]}
-                  onChange={(e) => {
-                    setDate(new Date((e as any).target.value));
-                    setShowDatePicker(false);
-                  }}
-                  onBlur={() => setShowDatePicker(false)}
-                />
-              ) : (
-                <DateTimePicker 
-                  value={date} 
-                  mode="date" 
-                  display={Platform.OS === 'ios' ? 'spinner' : 'calendar'} 
-                  onChange={onDateChange} 
-                  minimumDate={new Date()} 
-                />
-              )
-            )}
-            
-            {showTimePicker && (
-              Platform.OS === 'web' ? (
-                // @ts-ignore
-                <TextInput
-                  type="time"
-                  style={styles.webPicker}
-                  value={formatTime(time)}
-                  onChange={(e) => {
-                    const [h, m] = (e as any).target.value.split(':');
-                    const newTime = new Date(time);
-                    newTime.setHours(parseInt(h), parseInt(m));
-                    setTime(newTime);
-                    setShowTimePicker(false);
-                  }}
-                  onBlur={() => setShowTimePicker(false)}
-                />
-              ) : (
-                <DateTimePicker 
-                  value={time} 
-                  mode="time" 
-                  display={Platform.OS === 'ios' ? 'spinner' : 'clock'} 
-                  onChange={onTimeChange} 
-                />
-              )
-            )}
-
-            <TouchableOpacity style={styles.searchButton} onPress={handleSearch} disabled={isSearching}>
-              {isSearching ? (
-                <ActivityIndicator color={AppColors.background} />
-              ) : (
-                <Text style={styles.searchButtonText}>Search Cabs</Text>
-              )}
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/profile')}
+              style={styles.profileButton}
+              activeOpacity={0.7}
+              accessibilityLabel="Go to profile"
+            >
+              <Ionicons name="person" size={20} color={colors.white} />
             </TouchableOpacity>
-
           </View>
+
+          <View style={styles.searchCardContainer}>
+            <SearchCard
+              from={fromCity || undefined}
+              to={toCity || undefined}
+              onPress={() => router.push('/(booking)/search')}
+            />
+          </View>
+        </LinearGradient>
+
+        {/* Choose Your Ride */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Choose Your Ride</Text>
+          <View style={styles.serviceGrid}>
+            <TouchableOpacity
+              onPress={() => router.push('/(booking)/search')}
+              activeOpacity={0.8}
+              style={styles.serviceCard}
+            >
+              <View style={[styles.serviceIcon, { backgroundColor: colors.primary[50] }]}>
+                <Ionicons name="bus" size={28} color={colors.primary[600]} />
+              </View>
+              <Text style={styles.serviceName}>Bus</Text>
+              <Text style={styles.serviceDesc}>Comfortable travel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push('/(booking)/search')}
+              activeOpacity={0.8}
+              style={styles.serviceCard}
+            >
+              <View style={[styles.serviceIcon, { backgroundColor: colors.success[50] }]}>
+                <Ionicons name="car" size={28} color={colors.success[600]} />
+              </View>
+              <Text style={styles.serviceName}>Car</Text>
+              <Text style={styles.serviceDesc}>Private & flexible</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Value Proposition */}
+          <LinearGradient
+            colors={[colors.success[500], colors.primary[600]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.valueBanner}
+          >
+            <View style={styles.valueIcon}>
+              <Ionicons name="star" size={24} color={colors.white} />
+            </View>
+            <View>
+              <Text style={styles.valueTitle}>Transparent ₹/km Pricing</Text>
+              <Text style={styles.valueDesc}>No hidden charges, ever!</Text>
+            </View>
+          </LinearGradient>
         </View>
 
-        {/* Features Section */}
-        <View style={styles.featuresSection}>
-          <Text style={styles.sectionTitle}>Why choose Destow?</Text>
-          
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.featuresScroll}>
-            <View style={styles.featureCard}>
-              <View style={styles.featureIconOuter}>
-                <View style={styles.featureIconInner}>
-                  <MaterialCommunityIcons name="shield-check-outline" size={24} color={AppColors.brand} />
-                </View>
-              </View>
-              <Text style={styles.featureText}>Verified Drivers</Text>
+        {/* Popular Routes */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Popular Routes</Text>
+            <TouchableOpacity activeOpacity={0.7}>
+              <Text style={styles.seeAll}>See All</Text>
+            </TouchableOpacity>
+          </View>
+          {loading ? (
+            <LoadingSkeleton count={3} variant="listItem" />
+          ) : (
+            <View style={styles.routesList}>
+              {popularRoutes.map((route, index) => (
+                <PopularRouteCard
+                  key={index}
+                  route={route}
+                  onPress={() => {
+                    setFromCity(route.from);
+                    setToCity(route.to);
+                    router.push('/(booking)/search');
+                  }}
+                />
+              ))}
             </View>
-
-            <View style={styles.featureCard}>
-              <View style={styles.featureIconOuter}>
-                <View style={[styles.featureIconInner, {backgroundColor: AppColors.background}]}>
-                  <Feather name="search" size={24} color={AppColors.brand} />
-                </View>
-              </View>
-              <Text style={styles.featureText}>Transparent{'\n'}Pricing</Text>
-            </View>
-          </ScrollView>
+          )}
         </View>
 
+        <View style={{ height: 100 }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: colors.primary[600],
+  },
   container: {
     flex: 1,
-    backgroundColor: AppColors.background,
+    backgroundColor: colors.neutral[50],
   },
-  scrollContainer: {
-    flexGrow: 1,
-    paddingBottom: Spacing.xl * 2,
+  header: {
+    paddingTop: spacing.base,
+    paddingBottom: spacing.xxxl,
+    paddingHorizontal: spacing.base,
+    borderBottomLeftRadius: radii.xxl,
+    borderBottomRightRadius: radii.xxl,
+    ...shadows.lg,
   },
-  heroSection: {
-    height: 320,
-    width: '100%',
-    position: 'relative',
-  },
-  heroImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    paddingHorizontal: Spacing.lg,
-  },
-  headerContent: {
+  headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: Spacing.xl,
+    marginBottom: spacing.lg,
   },
-  greetingLight: {
-    fontSize: 24,
-    color: AppColors.background,
-    fontWeight: '400',
-  },
-  greetingBold: {
-    fontSize: 32,
-    color: AppColors.background,
-    fontWeight: '800',
-    marginTop: -4,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  searchCardWrapper: {
-    marginTop: -100,
-    paddingHorizontal: Spacing.lg,
-    zIndex: 10,
-  },
-  searchCard: {
-    backgroundColor: AppColors.background,
-    borderRadius: Radii.card,
-    padding: Spacing.lg,
-    ...Shadows.card,
-  },
-  routeContainer: {
+  headerLeft: {
     flexDirection: 'row',
-    marginBottom: Spacing.lg,
-  },
-  timelineColumn: {
-    width: 30,
     alignItems: 'center',
-    paddingTop: 36,
-    paddingBottom: 24,
+    gap: spacing.md,
   },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: AppColors.accent,
-  },
-  line: {
-    width: 2,
-    flex: 1,
-    backgroundColor: AppColors.border,
-    marginVertical: 4,
-  },
-  swapIconContainer: {
-    width: 24,
-    height: 24,
+  headerLogo: {
+    width: 52,
+    height: 52,
     borderRadius: 12,
-    backgroundColor: AppColors.accentLight,
+  },
+  headerTitle: {
+    fontSize: typography.sizes.xl,
+    fontFamily: `${typography.fontFamily}_700Bold`,
+    color: colors.white,
+  },
+  headerSubtitle: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  profileButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 4,
   },
-  locationsColumn: {
-    flex: 1,
+  searchCardContainer: {
+    marginTop: spacing.sm,
   },
-  locationInput: {
-    marginVertical: Spacing.sm,
+  section: {
+    paddingHorizontal: spacing.base,
+    paddingTop: spacing.xl,
   },
-  locationLabel: {
-    ...Typography.label,
-    marginBottom: 4,
-    color: AppColors.textMuted,
-    fontSize: 10,
-    letterSpacing: 1,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  locationIcon: {
-    marginRight: Spacing.sm,
-  },
-  locationInputText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: AppColors.brand,
-    paddingVertical: Spacing.xs,
-    flex: 1,
-  },
-  locationDivider: {
-    height: 1,
-    backgroundColor: AppColors.border,
-    marginVertical: Spacing.md,
-    marginLeft: 30,
-  },
-  dateTimeContainer: {
+  sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: Spacing.xl,
-  },
-  dateTimeBlock: {
-    flex: 1,
-    marginRight: Spacing.sm,
-  },
-  dateTimeLabel: {
-    ...Typography.label,
-    marginBottom: Spacing.sm,
-    fontSize: 10,
-    letterSpacing: 1,
-  },
-  pickerButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: AppColors.cardBgLight,
-    borderWidth: 1,
-    borderColor: AppColors.border,
-    borderRadius: Radii.input,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-  },
-  pickerText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: AppColors.brand,
-    marginLeft: Spacing.sm,
-  },
-  searchButton: {
-    ...CommonStyles.primaryButton,
-    width: '100%',
-    borderRadius: Radii.input,
-  },
-  searchButtonText: {
-    ...Typography.buttonText,
-    color: AppColors.background,
-    fontSize: 18,
-  },
-  featuresSection: {
-    paddingTop: Spacing.xl,
-    paddingHorizontal: Spacing.lg,
+    marginBottom: spacing.base,
   },
   sectionTitle: {
-    ...Typography.sectionHeading,
-    marginBottom: Spacing.lg,
+    fontSize: typography.sizes.lg,
+    fontFamily: `${typography.fontFamily}_600SemiBold`,
+    color: colors.neutral[900],
+    marginBottom: spacing.base,
   },
-  featuresScroll: {
-    paddingBottom: Spacing.lg,
+  seeAll: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_600SemiBold`,
+    color: colors.primary[600],
   },
-  featureCard: {
-    backgroundColor: AppColors.cardBgLight,
-    width: 140,
-    height: 150,
-    borderRadius: Radii.card,
-    marginRight: Spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.md,
+  serviceGrid: {
+    flexDirection: 'row',
+    gap: spacing.base,
+    marginBottom: spacing.base,
   },
-  featureIconOuter: {
-    backgroundColor: AppColors.accent,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.md,
-  },
-  featureIconInner: {
-    backgroundColor: AppColors.background,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: AppColors.brand,
-    textAlign: 'center',
-  },
-  webPicker: {
-    backgroundColor: AppColors.background,
+  serviceCard: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
     borderWidth: 1,
-    borderColor: AppColors.brand,
-    borderRadius: Radii.input,
-    padding: Spacing.sm,
-    marginBottom: Spacing.md,
-    fontSize: 16,
-    color: AppColors.brand,
+    borderColor: colors.neutral[100],
+    ...shadows.sm,
+  },
+  serviceIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  serviceName: {
+    fontSize: typography.sizes.md,
+    fontFamily: `${typography.fontFamily}_600SemiBold`,
+    color: colors.neutral[900],
+    marginBottom: 2,
+  },
+  serviceDesc: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: colors.neutral[500],
+  },
+  valueBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    padding: spacing.base,
+    borderRadius: radii.xl,
+  },
+  valueIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  valueTitle: {
+    fontSize: typography.sizes.md,
+    fontFamily: `${typography.fontFamily}_700Bold`,
+    color: colors.white,
+  },
+  valueDesc: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  routesList: {
+    gap: spacing.base,
   },
 });

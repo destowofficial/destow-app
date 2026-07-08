@@ -1,66 +1,112 @@
-import { Tabs } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import { AppColors, Spacing, Shadows } from '../../constants/design-tokens';
+import { View } from "react-native";
+import { Tabs, Redirect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useAppStore } from "../../stores/useAppStore";
+import { useAuthStore } from "../../stores/useAuthStore";
+import { colors } from "../../theme/colors";
 
-export default function TabLayout() {
+export default function TabsLayout() {
+  const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  if (!hasCompletedOnboarding) {
+    return <Redirect href="/(auth)/splash" />;
+  }
+
+  if (!isAuthenticated) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarActiveTintColor: colors.primary[600],
+        tabBarInactiveTintColor: colors.neutral[400],
         tabBarStyle: {
-          backgroundColor: AppColors.background,
-          borderTopWidth: 0,
-          height: 65,
-          paddingBottom: Spacing.sm,
-          paddingTop: Spacing.xs,
-          ...Shadows.subtle,
+          backgroundColor: colors.white,
+          borderTopColor: colors.neutral[200],
+          borderTopWidth: 2,
+          borderBottomWidth: 1,
+          paddingBottom: 4,
+          paddingTop: 4,
         },
-        tabBarActiveTintColor: AppColors.brand,
-        tabBarInactiveTintColor: AppColors.tabInactive,
-        tabBarShowLabel: true,
         tabBarLabelStyle: {
-          fontSize: 10,
-          fontWeight: '600',
-          marginTop: 4,
+          fontSize: 12,
         },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => (
-            <Feather name="home" size={24} color={color} />
+          title: "Home",
+          tabBarLabel: "Home",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "home" : "home-outline"}
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="trips"
         options={{
-          title: 'Trips',
-          tabBarIcon: ({ color }) => (
-            <Feather name="book-open" size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="support"
-        options={{
-          title: 'Support',
-          tabBarIcon: ({ color }) => (
-            <Feather name="message-square" size={24} color={color} />
+          title: "My Trips",
+          tabBarLabel: "My Trips",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "ticket" : "ticket-outline"}
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ color }) => (
-            <Feather name="user" size={24} color={color} />
+          title: "Profile",
+          tabBarLabel: "Profile",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "person" : "person-outline"}
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
     </Tabs>
+  );
+}
+
+function TabIcon({
+  name,
+  color,
+  focused,
+}: {
+  name: string;
+  color: string | import("react-native").OpaqueColorValue;
+  focused: boolean;
+}) {
+  return (
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: focused ? (color as string) : "transparent",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Ionicons
+        name={name as any}
+        size={22}
+        color={focused ? "#ffffff" : (color as string)}
+      />
+    </View>
   );
 }

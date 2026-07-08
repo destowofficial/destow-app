@@ -1,32 +1,38 @@
 {
   "expo": {
-    "name": "destow-mobile",
-    "slug": "destow-mobile",
+    "name": "DESTOW",
+    "slug": "destow",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "destowmobile",
+    "icon": "./assets/icon.png",
+    "scheme": "destow",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#2563eb"
+    },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.destow.app"
     },
     "android": {
-      "package": "com.destow.app",
-      "googleServicesFile": "./google-services.json",
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#2563eb"
+      },
+      "package": "com.destow.app"
     },
     "web": {
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
     },
     "plugins": [
       "expo-router"
     ],
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
+      "typedRoutes": true
     }
   }
 }
