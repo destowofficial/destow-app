@@ -2,6 +2,10 @@
 node_modules/
 .npm/
 
+# npm lockfiles — this is a Bun workspace, bun.lock is the single source of truth
+package-lock.json
+**/package-lock.json
+
 # Environment variables
 .env
 .env.local
@@ -30,6 +34,10 @@ packaged.yaml
 
 # Turborepo cache
 .turbo/
+
+# Docker Compose local dev overrides (hot-reload etc.) — never committed
+docker-compose.override.yml
+**/docker-compose.override.yml
 
 # Claude Code (local, not shared)
 .claude/
