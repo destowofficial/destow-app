@@ -1,5 +1,5 @@
 # Local Postgres for the Destow backend.
-# Drizzle migrations own the schema — no init SQL is mounted (avoids the legacy init-db.sql collision).
+# Drizzle migrations own the schema — no init SQL is mounted.
 # Ports avoid the host's postgresql@18 (5433) and the conventional 5432.
 #
 #   Full stack: docker compose up -d --build        → API on localhost:3000 + DB

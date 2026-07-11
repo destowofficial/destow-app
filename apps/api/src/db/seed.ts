@@ -66,7 +66,7 @@ export async function seedDatabase(db: Db): Promise<void> {
   }
 }
 
-// Runs only when executed directly (npm run db:seed), not when imported by tests.
+// Runs only when executed directly (bun run db:seed), not when imported by tests.
 async function run() {
   const { db, pool } = await import('./connection.js');
   await seedDatabase(db);

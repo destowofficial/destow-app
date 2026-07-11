@@ -55,20 +55,20 @@ theme/                  # Design tokens (colors, typography, spacing)
 ## Getting Started
 
 ```bash
-# Install dependencies
-npm install
+# Install dependencies (run from the repo root — Bun workspace)
+bun install
 
 # Start development server
-npx expo start
+bun expo start
 
 # Start web version
-npx expo start --web
+bun expo start --web
 
 # Start iOS
-npx expo start --ios
+bun expo start --ios
 
 # Start Android
-npx expo start --android
+bun expo start --android
 ```
 
 ## Navigation Flow

@@ -1,119 +1,100 @@
-# 🚕 Destow API (Backend)
+# Destow API
 
-[![Node.js](https://img.shields.io/badge/Node.js-v20-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Express](https://img.shields.io/badge/Express-js-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
-[![AWS Serverless](https://img.shields.io/badge/AWS-Serverless-FF9900?style=for-the-badge&logo=amazonaws&logoColor=white)](https://aws.amazon.com/serverless/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Managed-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+Backend for Destow — an intercity cab & bus booking marketplace. **Bun + Express +
+PostgreSQL (Drizzle) + Redis**, served behind a Caddy gateway. Bun runs the
+TypeScript directly, so there is no build step.
 
-The high-performance backend infrastructure for **Destow** — the premium intercity cab booking platform. Built with a focus on cost-effectiveness, zero-maintenance scaling, and seamless cloud integrations.
+Part of the [Destow monorepo](../../README.md) — most tasks run from the repo
+root via the `Makefile`.
 
----
-
-## 🏗️ Technical Architecture
-
-Destow Backend has been migrated to a fully **AWS Serverless Architecture**.
-
-- **Zero Server Management**: Powered by **AWS Lambda** via `serverless-http`.
-- **Fast Web Framework**: Built on **Express.js** for easy routing and middleware support.
-- **Relational Database**: Connected natively to **PostgreSQL** using the `pg` package.
-- **Cloud-Native Deployments**: Managed via **AWS CloudFormation** (`cloudformation.yaml`).
-
-*(Note: Firebase and Drizzle ORM have been entirely removed in favor of native PostgreSQL and planned AWS SNS integrations).*
-
----
-
-## 🛠️ Tech Stack & Dependencies
+## Stack
 
 | Layer | Technology |
-| :--- | :--- |
-| **Runtime** | Node.js v20.x |
-| **Framework** | Express.js |
-| **Serverless Adapter** | `serverless-http` |
-| **Database Driver** | `pg` (PostgreSQL) |
-| **Infrastructure** | AWS API Gateway + AWS Lambda |
+| --- | --- |
+| Runtime | Bun (TypeScript, no bundler) |
+| HTTP | Express 5 |
+| Database | PostgreSQL via Drizzle ORM (money in integer paise, distance in integer metres) |
+| Cache / real-time | Redis (auth revocation denylist, rate limits) |
+| Gateway | Caddy (single public entry point; the API is internal-only) |
+| Auth | phone + OTP -> EdDSA (Ed25519) access tokens + rotating refresh tokens, Redis-backed revocation |
+| OTP delivery | swappable adapter (AWS SNS today; WhatsApp planned) |
 
----
+## Local development
 
-## 🚦 Getting Started (Local Development)
-
-We use Docker to instantly spin up a local PostgreSQL database for local testing.
-
-### 1️⃣ Prerequisites
-- **Node.js** v20 or higher
-- **Docker** and **Docker Compose**
-
-### 2️⃣ Start the Local Database
-```bash
-# Spins up PostgreSQL and automatically seeds it with initial tables and data via init-db.sql
-docker-compose up -d
-```
-
-### 3️⃣ Environment & Dependencies
-```bash
-npm install
-```
-
-Ensure the following variables are defined in your `.env` file:
-```env
-PORT=3000
-NODE_ENV=development
-DATABASE_URL=postgres://postgres:password@localhost:5432/destow
-JWT_SECRET=replace_with_a_very_long_local_secret
-JWT_EXPIRES_IN=7d
-```
-
-### 4️⃣ Start the Server
-```bash
-npm start
-```
-Server will be live at `http://localhost:3000`
-
----
-
-## 🚀 AWS Deployment Workflow
-
-Deploying this backend to the live internet is fully automated.
-
-1. Create an AWS S3 Bucket (e.g., `destow-my-bucket`).
-2. Run the deployment script from the project root:
+From the repo root (recommended):
 
 ```bash
-cd ..
-./deploy.sh -b destow-my-bucket
+make up          # gateway + api + postgres + redis + minio (hot-reload)
+make migrate     # run migrations
+make logs        # tail api + gateway logs
 ```
 
-The deployment creates a private PostgreSQL RDS database, connects Lambda to it, and prompts for the DB password and JWT secret.
+The API is reachable through the gateway at `http://localhost:3000` (`/health`
+to check). Or run docker compose directly:
 
-This will output your live **ApiUrl** which you can plug directly into the React Native app.
+```bash
+cd apps/api && docker compose up -d --build
+```
 
----
+Environment: `make env` copies `.env.example` to `.env` (fill it in). The docker
+stack also gets its env from `docker-compose.yml`. Key vars: `DATABASE_URL`,
+`REDIS_URL`, `JWT_SECRET` (OTP HMAC), and — for the production token path —
+`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY` (Ed25519 PEM/base64; unset in dev = an
+ephemeral keypair).
 
-## 📂 Project Structure
+## Structure
 
 ```text
-destow-backend/
-├── server.js             # Main Express app, Database connection, & AWS Lambda handler
-├── docker-compose.yml    # Local Database configuration
-├── init-db.sql           # Database schema and mock data
-├── package.json          # Dependencies
-└── .env                  # Local Environment Variables
+src/
+├── index.ts            # Express app + HTTP server (Socket.io attaches here later)
+├── v1/                 # versioned route files (auth.route.ts, ...)
+├── controllers/<f>/    # per-feature controllers
+├── services/<f>/       # per-feature services
+├── middleware/         # auth (JWT verify + denylist), rate limiting
+├── lib/
+│   ├── auth/           # Ed25519 keys + JWKS, JWT sign/verify (jose)
+│   ├── adapters/       # sms, payments, maps (swappable providers)
+│   ├── pricing/        # fare + commission engine (integer paise)
+│   └── http/           # errors, response envelope, validation
+├── db/                 # Drizzle schema, migrations, connection, redis
+└── config/             # zod-validated env
 ```
 
----
+## API (v1)
 
-## 📡 Core API Endpoints
+Base path `/api/v1`. Envelope: `{ success, data }` on success, `{ success,
+error, code }` on failure.
 
-### Authentication (Currently Mocked)
-- `POST /auth/send-otp` - Simulates sending an OTP.
-- `POST /auth/verify-otp` - Verifies code (accepts `123456`).
+Auth:
+- `POST /auth/request-otp` — send an OTP (rate limited)
+- `POST /auth/verify-otp` — verify + create a session -> `{ accessToken, refreshToken, user }`
+- `POST /auth/refresh` — rotate the token pair (with reuse detection)
+- `POST /auth/logout` / `POST /auth/logout-all` — revoke this session / all sessions
+- `GET  /auth/sessions` — list active devices
 
-### Cabs & Agencies (Connected to DB)
-- `GET /cabs` - Retrieves available cabs with agency details.
-- `GET /agencies` - Retrieves registered travel agencies.
-- `POST /booking` - Creates a mock ride booking.
+System:
+- `GET /health`
+- `GET /.well-known/jwks.json` — public keys for verifying access tokens
 
----
+## Testing
 
-<p align="center">
-  Built with ❤️ for the Destow Ecosystem
-</p>
+```bash
+make test              # unit (backend + contracts)
+make test-integration  # auth/session integration (Postgres + Redis)
+```
+
+Or from `apps/api`: `bun test` (unit) and `bun run test:integration`.
+
+## Database
+
+```bash
+make migrate       # apply migrations
+make db-generate   # generate a migration from the Drizzle schema
+make seed          # seed baseline data
+```
+
+## Deployment
+
+On push to `main`, `.github/workflows/deploy.yml` builds this image
+(`Dockerfile`) and publishes it to GHCR; it runs on a VPS/ECS. Bun runs the
+TypeScript directly — no build step.
