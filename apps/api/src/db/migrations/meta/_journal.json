@@ -8,6 +8,13 @@
       "when": 1781633757120,
       "tag": "0000_marketplace_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783766654716,
+      "tag": "0001_secret_brother_voodoo",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { env } from '../config/env.js';
+import { env } from '../../config/env.js';
 import type { PaymentMethod } from '@destow/contracts';
 
 export interface ChargeRequest {

@@ -1,14 +1,13 @@
 import type { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
-import { db } from '../db/connection.js';
-import { users } from '../db/schema.js';
-import { env } from '../config/env.js';
-import { AppError } from '../lib/errors.js';
 import type { UserRole } from '@destow/contracts';
+import { AppError } from '../../lib/http/errors.js';
+import { verifyAccessToken } from '../../lib/auth/jwt.js';
+import { isRevoked } from '../../services/auth/session.service.js';
 
-// Verifies the Bearer JWT, confirms the user still exists, and attaches it to req.
-// (Express 5 forwards a thrown/rejected error to the error handler.)
+// Hot path: verify the EdDSA access token (signature + expiry + iss/aud), then
+// one O(1) Redis check for revocation. No Postgres hit - the role travels in the
+// token and is re-minted fresh on every refresh. (Express 5 forwards a
+// thrown/rejected error to the error handler.)
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
@@ -16,22 +15,20 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   }
   const token = header.slice(7);
 
-  let payload: { userId: string };
+  let claims;
   try {
-    payload = jwt.verify(token, env.JWT_SECRET) as { userId: string };
+    claims = await verifyAccessToken(token);
   } catch {
     throw AppError.unauthorized('Invalid or expired token');
   }
 
-  const [user] = await db
-    .select({ id: users.id, role: users.role })
-    .from(users)
-    .where(eq(users.id, payload.userId))
-    .limit(1);
-  if (!user) throw AppError.unauthorized('User not found');
+  if (await isRevoked(claims.sid)) {
+    throw AppError.unauthorized('Session has been revoked');
+  }
 
-  req.userId = user.id;
-  req.user = user;
+  req.userId = claims.sub;
+  req.sessionId = claims.sid;
+  req.user = { id: claims.sub, role: claims.role as UserRole };
   next();
 }
 

@@ -19,13 +19,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       NODE_ENV: development
       PORT: 3000
       DATABASE_URL: postgres://destow:destow_local@db:5432/destow
       REDIS_URL: redis://redis:6379
+      # OTP HMAC secret (token signing uses an Ed25519 keypair; dev auto-generates one).
       JWT_SECRET: local_dev_jwt_secret_at_least_32_characters_long
-      JWT_EXPIRES_IN: 7d
       AWS_REGION: ap-south-1
       CORS_ORIGINS: "*"
       S3_ENDPOINT: http://minio:9000

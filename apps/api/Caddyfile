@@ -4,6 +4,15 @@
 #
 # Local: listens on :80 (mapped to host :3000). No TLS locally.
 # Prod:  replace ":80" with "api.destow.com" and Caddy auto-provisions HTTPS.
+#
+# Auth model: the API is authoritative for auth (it owns the Redis revocation
+# denylist), so the gateway only proxies. Caddy forwards Authorization untouched
+# and sets X-Forwarded-For, which the API trusts (app.set('trust proxy', 1)) to
+# read the real client IP for rate limiting and session records.
+#
+# Optional future hardening: with EdDSA tokens, a caddy-jwt plugin can reject
+# unsigned/expired tokens at the edge using /.well-known/jwks.json as a COARSE
+# pre-filter - the API still does the authoritative denylist check.
 :80 {
 	encode gzip
 	reverse_proxy api:3000

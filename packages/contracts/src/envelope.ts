@@ -13,6 +13,7 @@ export const ERROR_CODE = [
   'not_found',
   'conflict',
   'rate_limited',
+  'service_unavailable',
   'internal',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODE)[number];
