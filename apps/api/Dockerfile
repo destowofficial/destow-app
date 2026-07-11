@@ -4,11 +4,16 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-# Install the api + contracts workspaces (mobile is not copied — see .dockerignore).
+# Install only the api workspace (+ its contracts dep). All workspace manifests
+# are copied so --frozen-lockfile can validate the full lockfile, but --filter
+# means mobile's deps are never installed, keeping the image lean.
+# --frozen-lockfile: build exactly what bun.lock pins (reproducible; can't
+# silently resolve a different/compromised version than what was audited).
 COPY package.json bun.lock ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/api/package.json apps/api/package.json
-RUN bun install
+COPY apps/mobile/package.json apps/mobile/package.json
+RUN bun install --frozen-lockfile --filter=@destow/api
 
 # Source (contracts ships TS source — Bun imports it directly, no build step).
 COPY packages/contracts packages/contracts

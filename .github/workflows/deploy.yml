@@ -1,51 +1,47 @@
-name: Deploy Destow Backend to AWS Lambda
+name: Build & Publish API image
 
+# Replaces the old Lambda/CloudFormation pipeline (the backend moved to Bun on
+# VPS/ECS - Lambda can't hold WebSocket connections). On every push to main this
+# builds the production image from apps/api/Dockerfile and publishes it to GHCR.
+# The actual rollout step is a documented TODO below - wire it once the target
+# host/cluster + secrets exist.
 on:
   push:
-    branches:
-      - main # Trigger on push to main branch
-    paths:
-      - 'apps/api/**'
-      - 'cloudformation.yaml'
+    branches: [main]
+    paths: ['apps/api/**', 'packages/contracts/**', 'bun.lock', 'apps/api/Dockerfile']
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          node-version: '20.x'
-          cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install and Build Backend
-        run: |
-          npm ci
-          npx turbo run build --filter=@destow/api
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Build & push image
+        uses: docker/build-push-action@v6
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-south-1 # Mumbai — matches the mobile app + India users
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}-api:latest
+            ghcr.io/${{ github.repository }}-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Package CloudFormation Template
-        run: |
-          aws cloudformation package \
-            --template-file cloudformation.yaml \
-            --s3-bucket ${{ secrets.AWS_DEPLOYMENT_BUCKET }} \
-            --output-template-file packaged.yaml
-
-      - name: Deploy CloudFormation Stack
-        run: |
-          aws cloudformation deploy \
-            --template-file packaged.yaml \
-            --stack-name destow-serverless-stack \
-            --capabilities CAPABILITY_IAM \
-            --parameter-overrides EnvironmentName=prod
+      # TODO deploy: once the target exists, add a step to roll out the new image.
+      #  - VPS:  ssh in, `docker compose pull && docker compose up -d`
+      #  - ECS:  `aws ecs update-service --force-new-deployment` (image from ECR;
+      #          swap the GHCR login/push above for ECR if you go this route)

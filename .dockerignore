@@ -7,4 +7,7 @@
 .git
 .github
 apps/mobile
+# ...but keep the manifest so --frozen-lockfile can validate the full workspace
+# (mobile's deps are excluded from install by --filter=@destow/api).
+!apps/mobile/package.json
 docs
