@@ -1,205 +1,300 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { AppColors, Spacing, Radii, Shadows, Typography, CommonStyles } from '../../constants/design-tokens';
-import { useEffect, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { getProfile, UserProfile } from '../../services/user.service';
+import { GradientHeader } from '../../components/ui/GradientHeader';
+import { ProfileMenuItem } from '../../components/cards/ProfileMenuItem';
+import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
+import { fetchUserProfile } from '../../services/api';
+import { useAuthStore } from '../../stores/useAuthStore';
+import type { UserProfile } from '../../services/types';
+import { colors } from '../../theme/colors';
+import { typography } from '../../theme/typography';
+import { spacing, radii, shadows } from '../../theme/spacing';
 
-export default function ProfileScreen() {
-  const { user: authUser, logout } = useAuth();
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+const menuItems = [
+  { id: 'personal', icon: 'person-outline', label: 'Personal Information', description: 'Update your profile details', color: colors.primary[600] },
+  { id: 'payment', icon: 'card-outline', label: 'Payment Methods', description: 'Manage your cards & UPI', color: colors.success[600], comingSoon: true },
+  { id: 'notifications', icon: 'notifications-outline', label: 'Notifications', description: 'Manage your alerts', color: colors.warning[500] },
+  { id: 'referral', icon: 'gift-outline', label: 'Refer & Earn', description: 'Invite friends and get rewards', color: '#9333ea', comingSoon: true },
+  { id: 'help', icon: 'help-circle-outline', label: 'Help & Support', description: 'Get help with your bookings', color: colors.primary[600] },
+  { id: 'terms', icon: 'document-text-outline', label: 'Terms & Conditions', description: 'Read our policies', color: colors.neutral[600] },
+  { id: 'privacy', icon: 'shield-checkmark-outline', label: 'Privacy Policy', description: 'How we protect your data', color: colors.neutral[600] },
+];
+
+export default function Profile() {
+  const router = useRouter();
+  const { user: authUser, logout } = useAuthStore();
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const data = await getProfile();
-        setProfile(data);
-      } catch {
-        // Fall back to AuthContext user silently
-      } finally {
-        setIsLoading(false);
-      }
-    })();
+    loadProfile();
   }, []);
 
-  const handleLogout = async () => {
-    await logout();
-    router.replace('/');
+  const loadProfile = async () => {
+    setLoading(true);
+    if (authUser) {
+      setUser({
+        name: authUser.name,
+        email: authUser.email,
+        phone: `+91 ${authUser.phone}`,
+        totalTrips: authUser.totalTrips,
+        rating: authUser.rating,
+      });
+    } else {
+      const { data } = await fetchUserProfile();
+      setUser(data);
+    }
+    setLoading(false);
   };
 
-  const displayName = profile?.name ?? authUser?.name ?? '—';
-  const displayPhone = profile?.phone ?? authUser?.phone ?? '—';
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.replace('/(auth)/login');
+        },
+      },
+    ]);
+  };
+
+  const handleMenuPress = (item: typeof menuItems[0]) => {
+    if ('comingSoon' in item && item.comingSoon) {
+      Alert.alert('Coming Soon', 'This feature will be available in a future update.');
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <Text style={styles.headerTitle}>Profile</Text>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <GradientHeader
+        title="Profile"
+        showBack
+        onBack={() => router.back()}
+      />
 
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        {/* Profile Info Card */}
-        <View style={styles.profileCard}>
-          <View style={styles.avatarContainer}>
-            <Feather name="user" size={40} color={AppColors.background} />
+      {/* User Card */}
+      <View style={styles.userCardContainer}>
+        <View style={styles.userCard}>
+          <View style={styles.avatar}>
+            <Ionicons name="person" size={32} color={colors.primary[600]} />
           </View>
-          {isLoading ? (
-            <ActivityIndicator color={AppColors.background} style={{ marginVertical: Spacing.md }} />
-          ) : (
+          {loading ? (
+            <LoadingSkeleton count={1} variant="listItem" />
+          ) : user && (
             <>
-              <Text style={styles.userName}>{displayName}</Text>
-              <View style={styles.phoneContainer}>
-                <Feather name="phone-call" size={14} color={AppColors.background} />
-                <Text style={styles.userPhone}>{displayPhone}</Text>
+              <View style={styles.userInfo}>
+                <Text style={styles.userName}>{user.name}</Text>
+                <View style={styles.ratingRow}>
+                  <Ionicons name="star" size={14} color="#facc15" />
+                  <Text style={styles.ratingText}>{user.rating}</Text>
+                  <Text style={styles.tripCount}>{user.totalTrips} trips</Text>
+                </View>
+              </View>
+              <View style={styles.contactInfo}>
+                <View style={styles.contactRow}>
+                  <Ionicons name="mail-outline" size={14} color="rgba(255,255,255,0.9)" />
+                  <Text style={styles.contactText}>{user.email}</Text>
+                </View>
+                <View style={styles.contactRow}>
+                  <Ionicons name="call-outline" size={14} color="rgba(255,255,255,0.9)" />
+                  <Text style={styles.contactText}>{user.phone}</Text>
+                </View>
               </View>
             </>
           )}
         </View>
+      </View>
 
-        {/* Action Menu List */}
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Menu Items */}
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuIconContainer}>
-              <MaterialCommunityIcons name="shield-check-outline" size={20} color={AppColors.brand} />
-            </View>
-            <Text style={styles.menuText}>Safety & Security</Text>
-            <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
-          </TouchableOpacity>
-          
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuIconContainer}>
-              <Feather name="help-circle" size={20} color={AppColors.brand} />
-            </View>
-            <Text style={styles.menuText}>Help & Support</Text>
-            <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
-          </TouchableOpacity>
-          
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuIconContainer}>
-              <Feather name="settings" size={20} color={AppColors.brand} />
-            </View>
-            <Text style={styles.menuText}>Settings</Text>
-            <Feather name="chevron-right" size={20} color={AppColors.textMuted} />
-          </TouchableOpacity>
+          {menuItems.map((item, index) => (
+            <ProfileMenuItem
+              key={item.id}
+              iconName={item.icon}
+              label={item.label}
+              description={item.description}
+              onPress={() => handleMenuPress(item)}
+              color={item.color}
+              isLast={index === menuItems.length - 1}
+            />
+          ))}
         </View>
 
-        {/* Logout Button */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Feather name="log-out" size={20} color={AppColors.background} style={styles.logoutIcon} />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        {/* Stats Cards */}
+        <View style={styles.statsGrid}>
+          <View style={styles.statCard}>
+            <View style={[styles.statIcon, { backgroundColor: colors.primary[50] }]}>
+              <Ionicons name="map-outline" size={24} color={colors.primary[600]} />
+            </View>
+            <Text style={styles.statValue}>{user?.totalTrips ?? 0}</Text>
+            <Text style={styles.statLabel}>Total Trips</Text>
+          </View>
+          <View style={styles.statCard}>
+            <View style={[styles.statIcon, { backgroundColor: colors.success[50] }]}>
+              <Ionicons name="star-outline" size={24} color={colors.success[600]} />
+            </View>
+            <Text style={styles.statValue}>{user?.rating ?? 0}</Text>
+            <Text style={styles.statLabel}>Your Rating</Text>
+          </View>
+        </View>
 
-        <Text style={styles.versionText}>Destow v1.0.0</Text>
+        {/* Logout */}
+        <View style={styles.logoutContainer}>
+          <ProfileMenuItem
+            iconName="log-out-outline"
+            label="Logout"
+            description=""
+            onPress={handleLogout}
+            color={colors.danger[600]}
+          />
+        </View>
+
+        <Text style={styles.version}>DESTOW v1.0.0</Text>
+        <Text style={styles.copyright}>© 2026 DESTOW Pvt Ltd. All rights reserved.</Text>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: colors.primary[600],
+  },
   container: {
     flex: 1,
-    backgroundColor: AppColors.background,
+    backgroundColor: colors.neutral[50],
   },
-  headerTitle: {
-    ...Typography.screenTitle,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xl,
-    paddingBottom: Spacing.lg,
-    fontSize: 28,
+  userCardContainer: {
+    backgroundColor: colors.primary[600],
+    paddingHorizontal: spacing.base,
+    paddingBottom: spacing.xxxl + spacing.base,
   },
-  scrollContainer: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.xl,
-  },
-  profileCard: {
-    backgroundColor: AppColors.brand,
-    borderRadius: Radii.card,
-    padding: Spacing.xl,
-    alignItems: 'center',
-    marginBottom: Spacing.xl,
-    ...Shadows.card,
-  },
-  avatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  userCard: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: radii.xl,
+    padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.4)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  avatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: Spacing.md,
+    marginBottom: spacing.base,
+  },
+  userInfo: {
+    marginBottom: spacing.md,
   },
   userName: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: AppColors.background,
-    marginBottom: Spacing.xs,
+    fontSize: typography.sizes.xl,
+    fontFamily: `${typography.fontFamily}_700Bold`,
+    color: colors.white,
+    marginBottom: 4,
   },
-  phoneContainer: {
+  ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
   },
-  userPhone: {
-    fontSize: 16,
-    color: AppColors.background,
-    marginLeft: Spacing.sm,
-    opacity: 0.9,
+  ratingText: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_500Medium`,
+    color: 'rgba(255,255,255,0.9)',
+  },
+  tripCount: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: 'rgba(255,255,255,0.6)',
+    marginLeft: spacing.sm,
+  },
+  contactInfo: {
+    gap: spacing.sm,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  contactText: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: 'rgba(255,255,255,0.9)',
   },
   menuContainer: {
-    backgroundColor: AppColors.cardBgLight,
-    borderRadius: Radii.card,
-    marginBottom: Spacing.xl,
+    backgroundColor: colors.white,
+    marginHorizontal: spacing.base,
+    marginTop: -spacing.base,
+    borderRadius: radii.xl,
+    overflow: 'hidden',
+    paddingTop: spacing.sm,
+    ...shadows.xl,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: spacing.base,
+    paddingHorizontal: spacing.base,
+    marginTop: spacing.xl,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    ...shadows.sm,
+  },
+  statIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  statValue: {
+    fontSize: 24,
+    fontFamily: `${typography.fontFamily}_700Bold`,
+    color: colors.neutral[900],
+    marginBottom: 2,
+  },
+  statLabel: {
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: colors.neutral[500],
+  },
+  logoutContainer: {
+    backgroundColor: colors.white,
+    marginHorizontal: spacing.base,
+    marginTop: spacing.xl,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: '#fecaca',
     overflow: 'hidden',
   },
-  menuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: Spacing.lg,
-  },
-  menuIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: AppColors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  menuText: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: AppColors.brand,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: AppColors.border,
-    marginLeft: 70,
-  },
-  logoutButton: {
-    ...CommonStyles.primaryButton,
-    backgroundColor: AppColors.error,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    shadowColor: AppColors.error,
-  },
-  logoutIcon: {
-    marginRight: Spacing.sm,
-  },
-  logoutText: {
-    ...Typography.buttonText,
-    color: AppColors.background,
-    fontSize: 18,
-  },
-  versionText: {
+  version: {
     textAlign: 'center',
-    color: AppColors.textMuted,
-    fontSize: 14,
-    marginTop: Spacing.xl,
+    fontSize: typography.sizes.sm,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: colors.neutral[400],
+    marginTop: spacing.xl,
+  },
+  copyright: {
+    textAlign: 'center',
+    fontSize: typography.sizes.xs,
+    fontFamily: `${typography.fontFamily}_400Regular`,
+    color: colors.neutral[400],
+    marginTop: spacing.xs,
   },
 });
