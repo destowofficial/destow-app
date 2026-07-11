@@ -1,7 +1,8 @@
-name: CI
+name: CI (backend)
 
-# Runs on every backend PR and on pushes to main. Gates merges on typecheck,
-# unit + integration tests, and a dependency vulnerability audit.
+# Backend typecheck + unit/integration tests on every backend PR and push to
+# main. Dependency auditing lives in audit.yml (whole monorepo); mobile checks
+# in mobile.yml.
 on:
   push:
     branches: [main]
@@ -50,18 +51,3 @@ jobs:
       - name: Integration tests (Postgres + Redis)
         working-directory: apps/api
         run: bun run test:integration
-
-  audit:
-    name: Dependency audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.9'
-      - name: Install (frozen lockfile)
-        run: bun install --frozen-lockfile
-      - name: Report all advisories (informational)
-        run: bun audit || true
-      - name: Fail on high/critical advisories
-        run: bun audit --audit-level=high

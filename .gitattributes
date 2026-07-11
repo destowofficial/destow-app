@@ -1,0 +1,17 @@
+# Cross-platform line endings: keep text files LF everywhere so the Makefile,
+# shell scripts, and Docker/compose files run on Windows (Git Bash / WSL) and
+# macOS/Linux alike. Without this, a Windows checkout can rewrite them to CRLF
+# and bash fails with `\r`-not-found errors.
+* text=auto eol=lf
+
+# Binary assets — never normalize.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
+*.hbc  binary
