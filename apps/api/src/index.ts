@@ -4,6 +4,8 @@ import cors from 'cors';
 import { env } from './config/env.js';
 import { errorHandler } from './lib/http/errors.js';
 import { getJwks } from './lib/auth/keys.js';
+import { metricsMiddleware } from './middleware/metrics/metrics.js';
+import { metricsText, metricsContentType } from './lib/metrics/metrics.js';
 import { v1Router } from './v1/index.js';
 
 const app: express.Express = express();
@@ -18,6 +20,7 @@ const corsOrigin =
   env.CORS_ORIGINS === '*' ? '*' : env.CORS_ORIGINS.split(',').map((o) => o.trim());
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
+app.use(metricsMiddleware);
 
 // --- Health -------------------------------------------------------------------
 app.get('/', (_req, res) => res.json({ status: 'ok', service: 'Destow API', version: '1.0.0' }));
@@ -25,6 +28,13 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date()
 
 // --- JWKS (public keys for verifying access tokens; served through the gateway) -
 app.get('/.well-known/jwks.json', async (_req, res) => res.json(await getJwks()));
+
+// --- Metrics (Prometheus). Observability/internal — restrict /metrics at the
+// gateway in prod so it is not publicly scrapeable.
+app.get('/metrics', async (_req, res) => {
+  res.set('Content-Type', metricsContentType());
+  res.send(await metricsText());
+});
 
 // --- API routes (migrations run as a deploy step, not on the request path) -----
 app.use('/api/v1', v1Router);
