@@ -1,128 +1,149 @@
 # Destow Application Architecture
 
-This document defines the architecture of the Destow application, covering both the **AWS Infrastructure** (how it runs) and the **Internal Code Architecture** (how the code is structured).
+How the Destow backend runs (infrastructure) and how the code is organised
+(internal architecture). Destow is an intercity cab & bus booking marketplace;
+this covers the API in `apps/api`.
 
 ---
 
-## 1. AWS Serverless Infrastructure Architecture
+## 1. Infrastructure
 
-The backend operates on a fully serverless AWS architecture, meaning there are no physical or virtual servers (like EC2) to manage.
+A single Caddy gateway is the only public entry point; the API is internal-only.
+The API is a long-running Bun process (not a Lambda) so it can hold WebSocket
+connections for the planned real-time tracking layer.
 
 ```mermaid
 graph TD
-    A[Mobile App - React Native] -->|HTTPS POST/GET| B(AWS API Gateway)
-    B -->|Proxies Request| C{AWS Lambda Function}
-    C -->|Queries| D[(Amazon RDS - PostgreSQL)]
-    
-    %% Internal Lambda structure
-    subgraph AWS Lambda Environment
-    C -->|Executes| E[server.js - serverless-http]
-    end
+    A[Mobile / clients] -->|HTTPS| B(Caddy gateway)
+    B -->|reverse_proxy, internal network| C[API - Bun + Express]
+    C -->|SQL| D[(PostgreSQL - Drizzle)]
+    C -->|revocation denylist, rate limits| E[(Redis)]
+    C -->|OTP SMS| F[AWS SNS]
+    C -->|KYC docs, vehicle photos| G[MinIO / S3]
 ```
 
-### Components:
-*   **AWS API Gateway (HTTP API):** Acts as the front door. It receives the HTTP requests from the React Native app and forwards them directly to Lambda.
-*   **AWS Lambda:** Runs the Node.js backend (`server.js`). It spins up automatically when a request arrives and shuts down when finished, ensuring you only pay for compute time used.
-*   **Amazon RDS (PostgreSQL):** The relational database storing agencies, cabs, and user data.
+- **Caddy gateway:** the front door. Terminates TLS, forwards `Authorization`
+  untouched, sets `X-Forwarded-For` (the API trusts one proxy hop so `req.ip` is
+  the real client), and passes WebSocket upgrades through transparently.
+- **API (Bun + Express):** runs the TypeScript directly (no build step). Not
+  exposed to the host; only the gateway can reach it.
+- **PostgreSQL (Drizzle ORM):** the source of truth — users, sessions, bookings,
+  and the marketplace catalog.
+- **Redis:** the auth revocation denylist and rate-limit counters (durable state
+  lives in Postgres; Redis is a rebuildable accelerator).
+- **AWS SNS / MinIO:** OTP SMS delivery (via a swappable adapter) and object
+  storage for KYC/photos.
+
+Deployment: on push to `main`, a container image is built (`apps/api/Dockerfile`)
+and published to GHCR, then run on a VPS/ECS.
 
 ---
 
-## 2. Application Code Architecture (`server.js`)
+## 2. Code architecture
 
-The actual Node.js application inside `destow-backend/server.js` is structured into 4 distinct layers:
+A layered **modular monolith**. Requests flow one direction; each layer has a
+single job.
 
-### Layer 1: Configuration & Database Connection
-*   **Express & CORS:** Sets up the API to accept JSON and allows cross-origin requests.
-*   **PostgreSQL Pool (`pg`):** Establishes a connection to the database. It relies on environment variables (`DB_USER`, `DB_PASSWORD`, `DB_HOST`) so the code works both locally and on AWS without changes.
+```
+route (v1/<f>.route.ts)  ->  controller (controllers/<f>/)  ->  service (services/<f>/)  ->  db
+        |                            |                                  |
+   HTTP method/path            validate input,               business logic, transactions,
+   + middleware                shape the response            Redis, adapters
+```
 
-### Layer 2: Authentication (Auth Service)
-Handles user onboarding and login.
-*   `POST /auth/send-otp`: Accepts a phone number. *(Currently mocked, future integration: AWS SNS for real SMS).*
-*   `POST /auth/verify-otp`: Verifies the code. *(Currently mocked to accept `123456`, returns a mocked JWT token).*
+- **`v1/`** — versioned route files; `v1/index.ts` mounts them at `/api/v1`.
+- **`controllers/<feature>/`** — parse/validate the request, call a service,
+  return the `{ success, data }` envelope.
+- **`services/<feature>/`** — the business logic (DB access, Redis, adapters).
+- **`middleware/`** — `auth` (JWT verify + denylist) and `ratelimit`.
+- **`lib/`** — `auth` (Ed25519 keys/JWKS + jose sign/verify), `adapters`
+  (sms/payments/maps, swappable by env), `pricing` (fare + commission engine),
+  `http` (error handler, response envelope, zod validation).
+- **`db/`** — Drizzle schema, migrations, the pg connection, and the Redis client.
+- **`config/`** — a single zod-validated `env` module.
 
-### Layer 3: Business Logic & Data Service
-Serves dynamic data to the mobile application.
-*   `GET /cabs`: Executes a `JOIN` SQL query to fetch a list of available cabs and their respective agency details from the database.
-*   `GET /agencies`: Executes a `SELECT` query to fetch registered travel agencies.
-*   `POST /booking`: Mock endpoint to confirm a ride.
-
-### Layer 4: The Export Layer (AWS Bridge)
-This allows the Express app to run natively in Serverless environments.
-*   **`serverless-http` wrapper:** Instead of `app.listen()` occupying a port, the Express app is wrapped and exported as `module.exports.handler`. This translates AWS API Gateway events into standard Express `req` and `res` objects.
+Shared enums and request/response schemas live in `packages/contracts` so the
+API and (later) the mobile app agree on one contract.
 
 ---
 
-## 3. Data Architecture (Database Schema)
+## 3. Authentication
 
-The PostgreSQL database relies on relational integrity between agencies and cabs:
+Phone + OTP, then a stateless-hybrid session:
 
-```sql
--- Agencies Table
-CREATE TABLE agencies (
-    id SERIAL PRIMARY KEY,
-    agency_name VARCHAR(255) NOT NULL,
-    city VARCHAR(100) NOT NULL
-);
+- **Access token** — EdDSA (Ed25519) JWT, ~10 min, signed with a private key.
+  Verified with the public key (served at `/.well-known/jwks.json`), so the
+  gateway or other services can validate without calling the API.
+- **Refresh token** — opaque random bytes, hashed in Postgres, ~60 days,
+  **rotated** on every use. Presenting an already-used refresh token is treated
+  as theft and revokes the whole session family (reuse detection).
+- **Revocation** — a Redis denylist keyed by session id kills a token
+  immediately on logout/ban; `requireAuth` checks it on the hot path. It is
+  **fail-closed**: if Redis is unreachable, auth returns 503 rather than
+  honouring a possibly-revoked token.
 
--- Cabs Table
-CREATE TABLE cabs (
-    id SERIAL PRIMARY KEY,
-    agency_id INTEGER REFERENCES agencies(id),
-    vehicle_type VARCHAR(100) NOT NULL,
-    description TEXT,
-    driver_included BOOLEAN DEFAULT true,
-    price_per_km DECIMAL NOT NULL
-);
-```
-
-*When the mobile app requests `/cabs`, the backend joins these tables to provide a complete picture of the cab and the agency providing it.*
+OTP codes are stored HMAC-hashed (never plaintext), single-active-per-phone,
+with attempt lockout and Redis-backed rate limiting (per-phone cooldown + hourly
+caps and a per-IP backstop).
 
 ---
 
-## 4. End-to-End API Flow (What happens when you click a button?)
+## 4. Money & pricing
 
-When a user interacts with the app (e.g., clicking "Search Cabs"), here is the exact sequence of events defined through the APIs:
+All money is integer **paise** and distance is integer **metres** — no floats
+ever touch money. A single server-side engine computes the fare and commission
+(`total = price_per_km * distance`, commission clamped to 15-20%), so the client
+can never set its own price. The fare is snapshotted onto a booking at creation,
+so later config changes never rewrite history.
 
-### Step 1: The UI Trigger (React Native)
-The user clicks a button in the mobile app.
-```javascript
-// destow-mobile: App UI
-<TouchableOpacity onPress={handleSearch}>
-  <Text>Search Cabs</Text>
-</TouchableOpacity>
+---
+
+## 5. Data model (key tables)
+
+```
+users(id, phone, name, role, status, ...)
+sessions(id, user_id, device, ip, expires_at, revoked_at, ...)
+refresh_tokens(id, session_id, token_hash, used_at, expires_at)
+auth_events(id, user_id, session_id, event, ...)          -- audit trail
+
+service_providers(id, owner_user_id, status, commission_bps_override, rating_*)
+vehicle_types(id, category, name, seats, ...)
+vehicles(id, service_provider_id, vehicle_type_id, price_per_km_paise, status)
+drivers(id, service_provider_id, name, phone, status)
+bookings(id, customer_user_id, vehicle_id, distance_m,
+         price_per_km_paise, total_fare_paise, commission_paise,      -- frozen snapshot
+         provider_payout_paise, status, payment_status, ...)
+ratings(id, booking_id, service_provider_id, rating, comment)
+platform_settings(id, commission_bps, ...)
+otps(id, phone, code_hash, expires_at, attempts, consumed_at)
 ```
 
-### Step 2: The Network Request (Client API Call)
-The `handleSearch` function makes an HTTP request to your AWS backend.
-```javascript
-// destow-mobile: API Call
-const response = await fetch('https://your-api-gateway-url.com/cabs?from=Delhi&to=Chandigarh');
-const data = await response.json();
+---
+
+## 6. End-to-end request flow (login)
+
+```mermaid
+sequenceDiagram
+    participant M as Mobile
+    participant G as Caddy gateway
+    participant A as API (Express)
+    participant DB as Postgres
+    participant R as Redis
+    M->>G: POST /api/v1/auth/request-otp { phone }
+    G->>A: reverse_proxy
+    A->>R: rate-limit check (cooldown + caps)
+    A->>DB: store hashed OTP
+    A-->>M: { success: true }  (dev also returns devCode)
+    M->>G: POST /api/v1/auth/verify-otp { phone, code }
+    G->>A: reverse_proxy
+    A->>DB: verify OTP, upsert user, create session + refresh token
+    A-->>M: { accessToken, refreshToken, user }
+    M->>G: GET /api/v1/... (Authorization: Bearer <access>)
+    A->>A: verify EdDSA signature (public key)
+    A->>R: denylist check (fail-closed)
+    A-->>M: { success, data }
 ```
 
-### Step 3: AWS Routing (API Gateway -> Lambda)
-1. The request hits **AWS API Gateway** over the internet.
-2. API Gateway looks at the catch-all route (`ANY /{proxy+}`) defined in `cloudformation.yaml`.
-3. It packages the HTTP request into an "event" and wakes up your **AWS Lambda function**.
-
-### Step 4: Backend Processing (`server.js`)
-Lambda feeds the event to `serverless-http`, which passes it to Express. Express finds the matching route.
-```javascript
-// destow-backend: server.js
-app.get('/cabs', async (req, res) => {
-  const { from, to } = req.query; // Extracts 'Delhi' and 'Chandigarh'
-  
-  // Step 5: Database Query
-  const result = await pool.query('SELECT * FROM cabs ...');
-  
-  // Step 6: The Response
-  res.json({ success: true, data: result.rows });
-});
-```
-
-### Step 7: The UI Update (React Native)
-The JSON response travels back through Lambda -> API Gateway -> Mobile App. The mobile app updates its "state", and the screen re-renders to show the cab cards!
-```javascript
-// destow-mobile: State Update
-setCabs(data.data); // UI instantly updates to show the list of cabs
-```
+The middleware verifies the token's signature and checks the Redis denylist with
+no database hit; the role travels in the token and is re-minted fresh on every
+refresh.

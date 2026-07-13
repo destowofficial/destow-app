@@ -1,52 +1,52 @@
 # Destow Project Targets & Roadmap
 
-This document outlines everything that has been accomplished so far and provides a clear, step-by-step checklist of targets for you to complete next.
+What has been built so far, and what comes next.
 
 ---
 
-## ✅ What We Have Accomplished (Phase 1 Complete)
+## Done
 
-*   [x] **Removed Firebase:** Stripped all Firebase dependencies from the mobile app and backend to prepare for AWS.
-*   [x] **AWS Serverless Conversion:** Wrapped the Express.js backend with `serverless-http` so it runs natively on AWS Lambda.
-*   [x] **Infrastructure as Code:** Created `cloudformation.yaml` to automatically provision API Gateway and Lambda.
-*   [x] **Automated Deployments:** Built `./deploy.sh` and a GitHub Actions workflow for 1-click deployments.
-*   [x] **Database Integration:** Swapped hardcoded mock data with the `pg` library to connect to a real PostgreSQL database.
-*   [x] **Local Environment:** Provided `docker-compose.yml` and `init-db.sql` to instantly spin up a local database for development.
-*   [x] **Documentation:** Detailed the architecture and API click-flow in `ARCHITECTURE.md`.
+**Backend rebuild (Bun toolchain)**
+- [x] Rebuilt the backend on **Bun + Express + TypeScript** (Bun runs TS directly, no build step).
+- [x] **PostgreSQL + Drizzle ORM** with generated migrations; money in integer paise, distance in integer metres.
+- [x] **Redis** for the auth revocation denylist and rate-limit counters.
+- [x] **Caddy gateway** as the single public entry point; the API is internal-only.
+
+**Authentication**
+- [x] Phone + OTP login; OTP codes stored HMAC-hashed with attempt lockout and Redis rate limiting (per-phone cooldown/caps + per-IP backstop).
+- [x] **EdDSA (Ed25519) access tokens** + JWKS endpoint; **rotating refresh tokens** with reuse detection; Redis-backed revocation that is **fail-closed**.
+- [x] Integration tests covering the reuse race, rotation, revoked/expired sessions, ban-at-refresh, and fail-closed behaviour.
+
+**Marketplace foundation**
+- [x] Server-side **fare + commission engine** (integer paise, commission clamped 15-20%) — the client can never set the price.
+- [x] Schema for providers, vehicle types, vehicles, drivers, bookings (with a frozen fare snapshot), ratings, and platform settings.
+- [x] Swappable **provider adapters** (SMS / payments / maps), selected by env.
+
+**Platform & tooling**
+- [x] Docker Compose local stack (gateway, api, Postgres, Redis, MinIO) + a cross-platform `Makefile`.
+- [x] CI: backend typecheck + tests (`ci.yml`), whole-workspace vulnerability audit (`audit.yml`), Expo checks (`mobile.yml`); Dependabot on the `bun` ecosystem.
+- [x] Deploy: container image built and published to GHCR on push to `main` (`deploy.yml`).
+- [x] Mobile: aligned Expo SDK 57 native-module versions (fixed a startup crash) and cleared all dependency vulnerabilities.
 
 ---
 
-## 🎯 Next Targets (Your To-Do List)
+## Next
 
-Work through these targets one by one to finish the application and get it live.
+### Marketplace core (build one module at a time)
+- [ ] Provider onboarding — a user becomes a provider and manages vehicles (RBAC).
+- [ ] Availability & quote — search a route; return available vehicles with server-computed per-km fares (distance from the maps adapter).
+- [ ] Bookings — create a booking with a server-frozen fare snapshot; customer history; provider queue.
+- [ ] Ratings — one per completed booking; feeds the provider rating.
 
-### Target 1: Local Database Setup & Testing
-*Goal: Ensure your backend can talk to the database on your computer.*
-- [ ] Install Docker on your machine.
-- [ ] Run `docker-compose up -d` inside the `destow-backend` folder to start the database.
-- [ ] Run `npm start` in the backend.
-- [ ] Open `http://localhost:3000/cabs` in your browser to verify it returns the database rows.
+### Integrations
+- [ ] **WhatsApp OTP** via the Meta Cloud API (behind the OTP delivery adapter); keep AWS SNS as the SMS fallback.
+- [ ] **Payments** — Razorpay adapter (order create + webhook verification).
+- [ ] **Maps** — Google Distance Matrix adapter for server-side distance.
+- [ ] **KYC** — document upload to MinIO/S3 + provider verification flow.
 
-### Target 2: Mobile App Integration
-*Goal: Connect the React Native app to your local backend.*
-- [ ] In `destow-mobile`, install `axios` (or use `fetch`).
-- [ ] Update the "Search Cabs" button to fetch data from `http://localhost:3000/cabs`.
-- [ ] Update the React Native UI to map over the returned JSON and display the cab cards dynamically.
+### Real-time
+- [ ] Socket.io live driver/trip tracking, attached to the API's HTTP server and backed by Redis pub/sub (the reason the API runs long-lived, not on Lambda).
 
-### Target 3: Real SMS Authentication
-*Goal: Replace the mocked OTP logic with real text messages.*
-- [ ] Install the AWS SDK in the backend: `npm install @aws-sdk/client-sns`.
-- [ ] Update `POST /auth/send-otp` in `server.js` to use AWS SNS to send a real text message.
-- [ ] Update `POST /auth/verify-otp` to validate the real code and generate a secure JWT token.
-
-### Target 4: AWS Cloud Provisioning
-*Goal: Set up the required AWS services in the cloud.*
-- [ ] Create an AWS Account and configure the AWS CLI (`aws configure`) on your laptop.
-- [ ] Create an Amazon S3 Bucket in the AWS Console (to hold your deployment code).
-- [ ] Create an Amazon RDS (PostgreSQL) database in the AWS Console.
-
-### Target 5: Production Deployment! 🚀
-*Goal: Put the backend on the internet and launch the app.*
-- [ ] Update `cloudformation.yaml` to inject your new RDS Database credentials (`DB_HOST`, `DB_PASSWORD`, etc.) into the Lambda Environment variables.
-- [ ] Run `./deploy.sh -b <your-s3-bucket-name>` to deploy the backend to AWS.
-- [ ] Take the generated `ApiUrl`, put it into your React Native app, and build your final mobile APK/IPA!
+### Production
+- [ ] Generate and set the Ed25519 signing keypair (`JWT_PRIVATE_KEY` / `JWT_PUBLIC_KEY`) — required in production.
+- [ ] Provision the target host (VPS or ECS), wire the rollout step in `deploy.yml`, and set real secrets (DB, Redis, SNS/WhatsApp, Razorpay, Maps).

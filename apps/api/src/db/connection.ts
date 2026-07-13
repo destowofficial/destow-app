@@ -24,8 +24,8 @@ function sslConfig(): pg.PoolConfig['ssl'] {
 const pool = new Pool({
   connectionString: env.DATABASE_URL,
   ssl: sslConfig(),
-  // Lambda-friendly pool tuning: keep connections bounded so many warm
-  // instances don't exhaust Postgres max_connections.
+  // Keep the pool bounded so multiple app instances don't exhaust Postgres
+  // max_connections.
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,

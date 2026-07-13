@@ -1,14 +1,14 @@
 version: 2
 # Continuous complement to the CI `bun audit` gate: Dependabot opens PRs when a
-# dependency gets a new advisory or a version bump. Reads package.json for each
-# workspace (npm ecosystem covers Bun projects).
+# dependency gets a new advisory or a version bump. Uses the `bun` ecosystem so
+# it updates bun.lock too — with the `npm` ecosystem it would bump package.json
+# without touching bun.lock, and those PRs would fail `bun install --frozen-lockfile`.
 updates:
-  - package-ecosystem: "npm"
-    directories:
-      - "/"
-      - "/apps/api"
-      - "/packages/contracts"
-      - "/apps/mobile"
+  - package-ecosystem: "bun"
+    # Single root entry: bun.lock lives only at the repo root and covers every
+    # workspace (apps/*, packages/*). Per-subdir entries would look for a lock
+    # that isn't there.
+    directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
