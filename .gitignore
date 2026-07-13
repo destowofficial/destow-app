@@ -35,6 +35,9 @@ packaged.yaml
 # Turborepo cache
 .turbo/
 
+# Database backups (local dumps)
+backups/
+
 # Docker Compose local dev overrides (hot-reload etc.) — never committed
 docker-compose.override.yml
 **/docker-compose.override.yml

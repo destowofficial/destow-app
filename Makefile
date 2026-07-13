@@ -22,8 +22,8 @@ DEV_SECRET := make_local_dev_secret_at_least_32_characters
 
 .DEFAULT_GOAL := help
 .PHONY: help install env validate up local down logs restart ps \
-        migrate seed db-generate mobile test test-integration audit \
-        typecheck ci clean
+        migrate seed db-generate backup restore mobile test test-integration \
+        audit typecheck ci clean
 
 help:
 	@echo "Destow — make targets"
@@ -38,6 +38,8 @@ help:
 	@echo "  make migrate        Run DB migrations (against the dockerized dev DB)"
 	@echo "  make seed           Seed the DB"
 	@echo "  make db-generate    Generate a new migration from the Drizzle schema"
+	@echo "  make backup         Back up the database to backups/ (timestamped dump)"
+	@echo "  make restore FILE=.. Restore the database from a dump file"
 	@echo "  make mobile         Start the Expo dev server"
 	@echo "  make test           Backend unit + contracts tests (fast, no infra)"
 	@echo "  make test-integration  Integration tests (spins up db-test + redis)"
@@ -98,6 +100,14 @@ seed:
 
 db-generate:
 	cd $(API) && DATABASE_URL="$(DEV_DB_URL)" bun run db:generate
+
+backup:
+	./scripts/db-backup.sh backups
+
+restore:
+	@test -n "$(FILE)" || { echo "usage: make restore FILE=backups/destow-<timestamp>.dump"; exit 1; }
+	cd $(API) && docker compose exec -T db pg_restore -U destow -d destow --clean --if-exists < ../../$(FILE)
+	@echo "restored from $(FILE)"
 
 # --- Mobile -----------------------------------------------------------------
 mobile:
