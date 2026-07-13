@@ -39,6 +39,9 @@ export class AppError extends Error {
   static rateLimited(message = 'Too many requests') {
     return new AppError(429, 'rate_limited', message);
   }
+  static serviceUnavailable(message = 'Service temporarily unavailable') {
+    return new AppError(503, 'service_unavailable', message);
+  }
 }
 
 // Express error-handling middleware (must keep 4 args). Single place the error

@@ -1,4 +1,4 @@
-import { env } from '../config/env.js';
+import { env } from '../../config/env.js';
 
 export interface DistanceResult {
   distanceM: number; // metres

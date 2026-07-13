@@ -13,6 +13,7 @@ import {
 import { sql, relations } from 'drizzle-orm';
 import {
   USER_ROLE,
+  USER_STATUS,
   CUSTOMER_TYPE,
   PROVIDER_STATUS,
   VEHICLE_CATEGORY,
@@ -26,6 +27,7 @@ import {
 
 // --- Enums (values are the single source of truth in @destow/contracts) -------
 export const userRoleEnum = pgEnum('user_role', USER_ROLE);
+export const userStatusEnum = pgEnum('user_status', USER_STATUS);
 export const customerTypeEnum = pgEnum('customer_type', CUSTOMER_TYPE);
 export const providerStatusEnum = pgEnum('provider_status', PROVIDER_STATUS);
 export const vehicleCategoryEnum = pgEnum('vehicle_category', VEHICLE_CATEGORY);
@@ -54,6 +56,7 @@ export const users = pgTable(
     email: text('email').unique(),
     avatarUrl: text('avatar_url'),
     role: userRoleEnum('role').notNull().default('customer'),
+    status: userStatusEnum('status').notNull().default('active'),
     customerType: customerTypeEnum('customer_type').notNull().default('individual'),
     companyName: text('company_name'), // B2B
     gstin: text('gstin'), // B2B
@@ -224,6 +227,64 @@ export const otps = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('otps_phone_expires_idx').on(t.phone, t.expiresAt)],
+);
+
+// --- Sessions (one row per device login; Postgres is the durable source of -----
+// truth for revocation, Redis is a hot-path cache/denylist rebuilt from here). --
+export const sessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+    deviceId: text('device_id'), // client-supplied stable id (optional)
+    deviceName: text('device_name'),
+    platform: text('platform'), // 'android' | 'ios' | 'web'
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedReason: text('revoked_reason'), // 'logout' | 'logout_all' | 'reuse_detected' | 'banned'
+  },
+  (t) => [
+    index('sessions_user_idx').on(t.userId),
+    index('sessions_active_idx').on(t.userId, t.revokedAt),
+  ],
+);
+
+// --- Refresh tokens (rotating chain per session; only the hash is stored). ------
+// Reuse of an already-used token => theft => revoke the whole session family. ---
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'cascade' }).notNull(),
+    tokenHash: text('token_hash').notNull(), // sha256(opaque token)
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }), // set when rotated; reuse after this = theft
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    uniqueIndex('refresh_tokens_hash_uidx').on(t.tokenHash),
+    index('refresh_tokens_session_idx').on(t.sessionId),
+  ],
+);
+
+// --- Auth audit trail (login / refresh / logout / revoke / reuse-detected) ------
+export const authEvents = pgTable(
+  'auth_events',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    sessionId: uuid('session_id'),
+    event: text('event').notNull(), // 'otp_requested' | 'login' | 'refresh' | 'logout' | 'logout_all' | 'reuse_detected'
+    ip: text('ip'),
+    userAgent: text('user_agent'),
+    meta: jsonb('meta'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('auth_events_user_idx').on(t.userId, t.createdAt)],
 );
 
 // --- Relations (for relational queries / joins) -------------------------------

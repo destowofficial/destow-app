@@ -4,3 +4,4 @@
 // added here per feature as the API is built.
 export * from './enums';
 export * from './envelope';
+export * from './auth';

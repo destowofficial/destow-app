@@ -1,0 +1,24 @@
+version: 2
+# Continuous complement to the CI `bun audit` gate: Dependabot opens PRs when a
+# dependency gets a new advisory or a version bump. Reads package.json for each
+# workspace (npm ecosystem covers Bun projects).
+updates:
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/apps/api"
+      - "/packages/contracts"
+      - "/apps/mobile"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # One grouped PR per workspace for routine minor/patch bumps (less noise);
+      # majors and security fixes still come as their own PRs.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

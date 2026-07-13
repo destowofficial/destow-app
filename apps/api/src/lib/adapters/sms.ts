@@ -1,5 +1,5 @@
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns';
-import { env } from '../config/env.js';
+import { env } from '../../config/env.js';
 
 // Swappable SMS delivery. Add MSG91/Twilio impls behind the same interface.
 export interface SmsProvider {

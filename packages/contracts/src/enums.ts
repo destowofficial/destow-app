@@ -7,6 +7,11 @@
 export const USER_ROLE = ['customer', 'provider', 'admin'] as const;
 export type UserRole = (typeof USER_ROLE)[number];
 
+// Account state - enforced on login/refresh. A suspended/banned user is rejected
+// even with a still-valid access token once it expires (<=10 min window).
+export const USER_STATUS = ['active', 'suspended', 'banned'] as const;
+export type UserStatus = (typeof USER_STATUS)[number];
+
 export const CUSTOMER_TYPE = ['individual', 'business'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPE)[number];
 

@@ -2,167 +2,160 @@
   "info": {
     "_postman_id": "destow-api-v1",
     "name": "Destow API",
-    "description": "Complete Postman collection for the Destow intercity cab booking backend API",
+    "description": "Destow backend (Bun + Express + Postgres). Phone+OTP auth with EdDSA access tokens (10 min) and rotating refresh tokens (60 days), Redis-backed revocation. Set {{phone}}, run Request OTP -> Verify OTP; the token pair is captured automatically. Marketplace endpoints (providers/vehicles/bookings) are added here as they are built.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }]
+  },
   "variable": [
+    { "key": "rootUrl", "value": "http://localhost:3000", "type": "string" },
     { "key": "baseUrl", "value": "http://localhost:3000/api/v1", "type": "string" },
-    { "key": "token", "value": "", "type": "string" }
+    { "key": "phone", "value": "9871234567", "type": "string" },
+    { "key": "devCode", "value": "", "type": "string" },
+    { "key": "accessToken", "value": "", "type": "string" },
+    { "key": "refreshToken", "value": "", "type": "string" }
   ],
   "item": [
     {
-      "name": "🔑 Auth",
+      "name": "Auth",
       "item": [
         {
-          "name": "Verify OTP (Phone Login)",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"firebaseIdToken\": \"YOUR_FIREBASE_ID_TOKEN_HERE\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/auth/verify-otp", "host": ["{{baseUrl}}"], "path": ["auth", "verify-otp"] }
-          }
-        },
-        {
-          "name": "Google SSO",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"firebaseIdToken\": \"YOUR_GOOGLE_FIREBASE_ID_TOKEN_HERE\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/auth/google-sso", "host": ["{{baseUrl}}"], "path": ["auth", "google-sso"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "👤 Users",
-      "item": [
-        {
-          "name": "Get My Profile",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users", "me"] }
-          }
-        },
-        {
-          "name": "Update My Profile",
-          "request": {
-            "method": "PUT",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Saikumar\",\n  \"avatarUrl\": \"https://example.com/avatar.jpg\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users", "me"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "🏠 Home",
-      "item": [
-        {
-          "name": "Get User Info (Home Screen)",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/home/user-info", "host": ["{{baseUrl}}"], "path": ["home", "user-info"] }
-          }
-        },
-        {
-          "name": "Search Route",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"date\": \"2026-04-20\",\n  \"time\": \"10:00\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/home/search", "host": ["{{baseUrl}}"], "path": ["home", "search"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "🚕 Cabs",
-      "item": [
-        {
-          "name": "Get Available Cabs",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"date\": \"2026-04-20\",\n  \"time\": \"10:00\",\n  \"distanceKm\": 280\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/cabs/available", "host": ["{{baseUrl}}"], "path": ["cabs", "available"] }
-          }
-        },
-        {
-          "name": "Book a Cab",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"cabId\": \"REPLACE_WITH_CAB_UUID\",\n  \"from\": \"Delhi\",\n  \"to\": \"Jaipur\",\n  \"pickupDatetime\": \"2026-04-20T10:00:00+05:30\",\n  \"distanceKm\": 280,\n  \"totalFare\": 3640,\n  \"paymentMethod\": \"upi\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/cabs/book", "host": ["{{baseUrl}}"], "path": ["cabs", "book"] }
-          }
-        },
-        {
-          "name": "Process Payment",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"bookingId\": \"REPLACE_WITH_BOOKING_UUID\",\n  \"method\": \"upi\",\n  \"transactionRef\": \"UPI-REF-123456\"\n}"
-            },
-            "url": { "raw": "{{baseUrl}}/cabs/payment", "host": ["{{baseUrl}}"], "path": ["cabs", "payment"] }
-          }
-        }
-      ]
-    },
-    {
-      "name": "📋 History",
-      "item": [
-        {
-          "name": "Get Trip History",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/history?page=1&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["history"],
-              "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "10" },
-                { "key": "status", "value": "completed", "disabled": true }
-              ]
+          "name": "Request OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data || {};",
+                  "// Dev/local only: the OTP is returned as devCode so Verify OTP can auto-fill it.",
+                  "if (d.devCode) { pm.collectionVariables.set('devCode', d.devCode); }",
+                  "pm.test('OTP requested', () => pm.response.to.have.status(200));"
+                ]
+              }
             }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{phone}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/request-otp", "host": ["{{baseUrl}}"], "path": ["auth", "request-otp"] },
+            "description": "Sends an OTP. Rate limited: 60s resend cooldown, 5/hour per phone, plus a per-IP cap. In dev the code comes back as `data.devCode`."
+          }
+        },
+        {
+          "name": "Verify OTP (Login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data || {};",
+                  "if (d.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', d.accessToken);",
+                  "  pm.collectionVariables.set('refreshToken', d.refreshToken);",
+                  "}",
+                  "pm.test('logged in (token pair issued)', () => pm.expect(d.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{phone}}\",\n  \"code\": \"{{devCode}}\",\n  \"deviceName\": \"Postman\",\n  \"platform\": \"web\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/auth/verify-otp", "host": ["{{baseUrl}}"], "path": ["auth", "verify-otp"] },
+            "description": "Verifies the OTP and creates a session. Returns { accessToken, refreshToken, tokenType, expiresIn, user }. The pair is captured into collection variables automatically."
+          }
+        },
+        {
+          "name": "Refresh (rotate tokens)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const d = pm.response.json().data || {};",
+                  "if (d.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', d.accessToken);",
+                  "  pm.collectionVariables.set('refreshToken', d.refreshToken);",
+                  "}",
+                  "pm.test('rotated', () => pm.expect(d.accessToken).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] },
+            "description": "Exchanges the refresh token for a new access+refresh pair (rotation). Reusing a rotated refresh token is treated as theft and revokes the whole session."
+          }
+        },
+        {
+          "name": "List Sessions (devices)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/sessions", "host": ["{{baseUrl}}"], "path": ["auth", "sessions"] },
+            "description": "Lists this user's active sessions (one per device). Requires a valid access token (inherited from the collection)."
+          }
+        },
+        {
+          "name": "Logout (this device)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] },
+            "description": "Revokes the current session. The access token is denylisted in Redis and stops working immediately."
+          }
+        },
+        {
+          "name": "Logout All (every device)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/auth/logout-all", "host": ["{{baseUrl}}"], "path": ["auth", "logout-all"] },
+            "description": "Revokes every session for this user (all devices)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{rootUrl}}/health", "host": ["{{rootUrl}}"], "path": ["health"] }
+          }
+        },
+        {
+          "name": "JWKS (public verification keys)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{rootUrl}}/.well-known/jwks.json",
+              "host": ["{{rootUrl}}"],
+              "path": [".well-known", "jwks.json"]
+            },
+            "description": "Ed25519 public keys used to verify access tokens (for the gateway, socket layer, or other services)."
           }
         }
       ]
