@@ -13,12 +13,23 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      # One grouped PR per workspace for routine minor/patch bumps (less noise);
-      # majors and security fixes still come as their own PRs.
+      # One grouped PR for routine minor/patch bumps (less noise); majors and
+      # security fixes still come as their own PRs.
       minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Hold back breaking majors we migrate deliberately, not via a bot:
+      # zod 3 -> 4 and TypeScript's new native compiler (7.x) both need code work.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # Batch action bumps into one PR instead of one-per-action.
+      github-actions:
+        patterns: ["*"]
