@@ -1,0 +1,126 @@
+# Open-source observability add-on for the Destow backend.
+#
+# Local:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+#   Grafana:    http://localhost:3001
+#   Prometheus: http://localhost:9090
+#
+# VPS:
+#   Use the same file with docker-compose.prod.yml. Keep ports bound to 127.0.0.1
+#   and reach Grafana through SSH tunneling or a protected Caddy vhost.
+#
+# Optional env overrides:
+#   PROMETHEUS_CONFIG=./observability/prometheus.vps.yml
+#   GRAFANA_ADMIN_USER=admin
+#   GRAFANA_ADMIN_PASSWORD=<strong password>
+#   GRAFANA_PORT=3001
+#   PROMETHEUS_PORT=9090
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: destow-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ${PROMETHEUS_CONFIG:-./observability/prometheus.local.yml}:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - destow_prometheus:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: destow-alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - destow_alertmanager:/alertmanager
+
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    container_name: destow-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-destow_admin_change_me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - destow_grafana:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: destow-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - destow_loki:/loki
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: destow-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./observability/promtail.yml:/etc/promtail/config.yml:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: destow-node-exporter
+    restart: unless-stopped
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: destow-cadvisor
+    restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: destow-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DATA_SOURCE_NAME:-postgresql://destow:destow_local@db:5432/destow?sslmode=disable}
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    container_name: destow-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-redis://redis:6379}
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.25.0
+    container_name: destow-blackbox-exporter
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    volumes:
+      - ./observability/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+
+volumes:
+  destow_prometheus:
+  destow_alertmanager:
+  destow_grafana:
+  destow_loki:

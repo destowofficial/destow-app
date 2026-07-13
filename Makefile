@@ -21,7 +21,7 @@ DEV_DB_URL := postgres://destow:destow_local@localhost:5434/destow
 DEV_SECRET := make_local_dev_secret_at_least_32_characters
 
 .DEFAULT_GOAL := help
-.PHONY: help install env validate up local down logs restart ps \
+.PHONY: help install env validate up local down logs restart ps obs-up obs-down obs-logs obs-ps \
         migrate seed db-generate backup restore mobile test test-integration \
         audit typecheck ci clean
 
@@ -35,6 +35,10 @@ help:
 	@echo "  make logs           Tail api + gateway logs"
 	@echo "  make restart        Recreate the api + gateway containers"
 	@echo "  make ps             Show stack status"
+	@echo "  make obs-up         Start local observability (Prometheus, Grafana, Loki, exporters)"
+	@echo "  make obs-down       Stop local observability"
+	@echo "  make obs-logs       Tail observability logs"
+	@echo "  make obs-ps         Show observability stack status"
 	@echo "  make migrate        Run DB migrations (against the dockerized dev DB)"
 	@echo "  make seed           Seed the DB"
 	@echo "  make db-generate    Generate a new migration from the Drizzle schema"
@@ -84,6 +88,23 @@ restart:
 
 ps:
 	$(DC) ps
+
+obs-up:
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
+	@echo ""
+	@echo "Observability up:"
+	@echo "  Grafana:    http://localhost:3001  (admin / destow_admin_change_me)"
+	@echo "  Prometheus: http://localhost:9090"
+
+obs-down:
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml stop prometheus alertmanager grafana loki promtail node-exporter cadvisor postgres-exporter redis-exporter blackbox-exporter
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml rm -f prometheus alertmanager grafana loki promtail node-exporter cadvisor postgres-exporter redis-exporter blackbox-exporter
+
+obs-logs:
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f prometheus grafana loki promtail
+
+obs-ps:
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml ps
 
 clean:
 	$(DC) down -v
