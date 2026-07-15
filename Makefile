@@ -35,7 +35,7 @@ help:
 	@echo "  make logs           Tail api + gateway logs"
 	@echo "  make restart        Recreate the api + gateway containers"
 	@echo "  make ps             Show stack status"
-	@echo "  make obs-up         Start local observability (Prometheus, Grafana, Loki, exporters)"
+	@echo "  make obs-up         Start local observability (Prometheus, Grafana, Alertmanager, Blackbox)"
 	@echo "  make obs-down       Stop local observability"
 	@echo "  make obs-logs       Tail observability logs"
 	@echo "  make obs-ps         Show observability stack status"
@@ -97,11 +97,11 @@ obs-up:
 	@echo "  Prometheus: http://localhost:9090"
 
 obs-down:
-	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml stop prometheus alertmanager grafana loki promtail node-exporter cadvisor postgres-exporter redis-exporter blackbox-exporter
-	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml rm -f prometheus alertmanager grafana loki promtail node-exporter cadvisor postgres-exporter redis-exporter blackbox-exporter
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml stop prometheus alertmanager grafana blackbox-exporter
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml rm -f prometheus alertmanager grafana blackbox-exporter
 
 obs-logs:
-	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f prometheus grafana loki promtail
+	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml logs -f prometheus grafana alertmanager blackbox-exporter
 
 obs-ps:
 	cd $(API) && docker compose -f docker-compose.yml -f docker-compose.observability.yml ps

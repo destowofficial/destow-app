@@ -1,4 +1,4 @@
-# Open-source observability add-on for the Destow backend.
+# Lightweight open-source observability add-on for the Destow backend.
 #
 # Local:
 #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
@@ -56,59 +56,7 @@ services:
     volumes:
       - destow_grafana:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-
-  loki:
-    image: grafana/loki:3.2.1
-    container_name: destow-loki
-    restart: unless-stopped
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - destow_loki:/loki
-
-  promtail:
-    image: grafana/promtail:3.2.1
-    container_name: destow-promtail
-    restart: unless-stopped
-    command: -config.file=/etc/promtail/config.yml
-    volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./observability/promtail.yml:/etc/promtail/config.yml:ro
-
-  node-exporter:
-    image: prom/node-exporter:v1.8.2
-    container_name: destow-node-exporter
-    restart: unless-stopped
-    pid: host
-    command:
-      - --path.rootfs=/host
-      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
-    volumes:
-      - /:/host:ro,rslave
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
-    container_name: destow-cadvisor
-    restart: unless-stopped
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-
-  postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.15.0
-    container_name: destow-postgres-exporter
-    restart: unless-stopped
-    environment:
-      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DATA_SOURCE_NAME:-postgresql://destow:destow_local@db:5432/destow?sslmode=disable}
-
-  redis-exporter:
-    image: oliver006/redis_exporter:v1.67.0
-    container_name: destow-redis-exporter
-    restart: unless-stopped
-    environment:
-      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-redis://redis:6379}
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
 
   blackbox-exporter:
     image: prom/blackbox-exporter:v0.25.0
@@ -123,4 +71,3 @@ volumes:
   destow_prometheus:
   destow_alertmanager:
   destow_grafana:
-  destow_loki:
