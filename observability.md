@@ -122,6 +122,26 @@ From `apps/api/src/lib/metrics/metrics.ts`:
 
 - `destow_http_requests_total`
 - `destow_http_request_duration_seconds`
+- `destow_auth_events_total`
+- `destow_rate_limit_events_total`
+- `destow_db_queries_total`
+- `destow_db_query_duration_seconds`
+- `destow_redis_commands_total`
+- `destow_redis_command_duration_seconds`
+- `destow_external_requests_total`
+- `destow_external_request_duration_seconds`
+- `destow_payment_events_total`
+- `destow_booking_events_total`
+- `destow_provider_assignment_events_total`
+- `destow_postgres_pool_connections`
+- `destow_bookings_total`
+- `destow_booking_total_fare_paise`
+- `destow_booking_commission_paise`
+- `destow_providers_total`
+- `destow_vehicles_total`
+- `destow_drivers_total`
+- `destow_sessions_total`
+- `destow_refresh_tokens_total`
 - default runtime/process metrics from `prom-client` with the `destow_` prefix
 
 From `apps/api/src/middleware/metrics/metrics.ts`:
@@ -139,6 +159,12 @@ The useful first dashboard is:
 - process memory and CPU
 - event loop lag
 - `/health` probe success
+- OTP request/verify success, failure, and rate-limit outcomes
+- session refresh/revocation events
+- Redis command rate, errors, and p95 latency
+- Postgres operation rate, errors, p95 latency, and pool state
+- SMS/payment provider call rate, errors, and latency
+- booking counts/value, provider/vehicle/driver inventory, and active sessions
 
 ## Alerts
 
@@ -148,6 +174,11 @@ The included rules focus on application readiness:
 - API `/health` is not returning 2xx
 - 5xx rate is above 2%
 - p95 latency is above 1 second for 10 minutes
+- OTP verification failure rate is high
+- SMS provider calls are failing
+- Redis commands are failing
+- Postgres operations are failing
+- payment provider events are failing
 
 That is the right baseline for a small production deployment. Host metrics,
 container metrics, database exporters, Redis exporters, Loki, and tracing can be
@@ -180,6 +211,32 @@ sum by (route, method) (rate(destow_http_requests_total[5m]))
 
 ```promql
 probe_success{job=~".*api-health"}
+```
+
+```promql
+sum by (event, result, reason) (rate(destow_auth_events_total[5m]))
+```
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, command) (rate(destow_redis_command_duration_seconds_bucket[5m]))
+)
+```
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le, operation) (rate(destow_db_query_duration_seconds_bucket[5m]))
+)
+```
+
+```promql
+sum by (provider, operation, result) (rate(destow_external_requests_total[5m]))
+```
+
+```promql
+sum by (status, payment_status) (destow_booking_total_fare_paise / 100)
 ```
 
 ## Add Later Only When Needed

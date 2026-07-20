@@ -1,5 +1,11 @@
 import { env } from '../../config/env.js';
 import type { PaymentMethod } from '@destow/contracts';
+import {
+  externalRequestDuration,
+  externalRequestsTotal,
+  observeAsync,
+  recordPaymentEvent,
+} from '../metrics/metrics.js';
 
 export interface ChargeRequest {
   bookingId: string;
@@ -20,14 +26,33 @@ export interface PaymentProvider {
 // Razorpay (RBI-compliant) - wired when keys are present.
 class RazorpayProvider implements PaymentProvider {
   async charge(_req: ChargeRequest): Promise<ChargeResult> {
-    throw new Error('RazorpayProvider not implemented - set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
+    try {
+      return await observeAsync(
+        externalRequestDuration,
+        externalRequestsTotal,
+        { provider: 'razorpay', operation: 'charge' },
+        async () => {
+          throw new Error('RazorpayProvider not implemented - set RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET');
+        },
+      );
+    } catch (err) {
+      recordPaymentEvent('razorpay', _req.method, 'error');
+      throw err;
+    }
   }
 }
 
 // Dev/stub: deterministic success, no real charge.
 class StubPaymentProvider implements PaymentProvider {
   async charge(req: ChargeRequest): Promise<ChargeResult> {
-    return { transactionRef: `STUB-${req.bookingId}`, status: 'paid' };
+    const result = await observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'stub', operation: 'charge' },
+      async () => ({ transactionRef: `STUB-${req.bookingId}`, status: 'paid' as const }),
+    );
+    recordPaymentEvent('stub', req.method, result.status);
+    return result;
   }
 }
 

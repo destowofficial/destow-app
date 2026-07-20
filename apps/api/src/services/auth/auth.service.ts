@@ -2,10 +2,11 @@ import crypto from 'node:crypto';
 import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { db } from '../../db/connection.js';
 import { users, otps } from '../../db/schema.js';
-import { redis, incrWithTtl } from '../../db/redis.js';
+import { redis, incrWithTtl, observeRedis } from '../../db/redis.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/http/errors.js';
 import { sms } from '../../lib/adapters/sms.js';
+import { recordAuthEvent, recordRateLimitEvent } from '../../lib/metrics/metrics.js';
 import {
   createSession,
   logAuthEvent,
@@ -36,23 +37,34 @@ function generateOtpCode(): string {
 // AppErrors and propagate unchanged.
 async function enforceOtpRateLimits(phone: string, ip?: string): Promise<void> {
   try {
-    const cooled = await redis.set(`otp:cd:${phone}`, '1', 'EX', env.OTP_RESEND_COOLDOWN_SEC, 'NX');
+    const cooled = await observeRedis('set', () =>
+      redis.set(`otp:cd:${phone}`, '1', 'EX', env.OTP_RESEND_COOLDOWN_SEC, 'NX'),
+    );
     if (cooled === null) {
+      recordAuthEvent('otp_request', 'blocked', 'cooldown');
+      recordRateLimitEvent('otp_phone_cooldown', 'blocked');
       throw AppError.rateLimited('Please wait before requesting another OTP');
     }
     const perPhone = await incrWithTtl(`otp:ph:${phone}`, 3600);
     if (perPhone > env.OTP_MAX_PER_HOUR) {
+      recordAuthEvent('otp_request', 'blocked', 'phone_hourly_limit');
+      recordRateLimitEvent('otp_phone_hourly', 'blocked');
       throw AppError.rateLimited('Too many OTP requests for this number - try again later');
     }
+    recordRateLimitEvent('otp_phone_hourly', 'allowed');
     if (ip) {
       const perIp = await incrWithTtl(`otp:ip:${ip}`, 3600);
       if (perIp > env.OTP_MAX_PER_HOUR * PER_IP_HOURLY_MULTIPLIER) {
+        recordAuthEvent('otp_request', 'blocked', 'ip_hourly_limit');
+        recordRateLimitEvent('otp_ip_hourly', 'blocked');
         throw AppError.rateLimited('Too many OTP requests - try again later');
       }
+      recordRateLimitEvent('otp_ip_hourly', 'allowed');
     }
   } catch (err) {
     if (err instanceof AppError) throw err; // genuine limit hit
     console.error('[auth] OTP rate-limit check failed (fail-closed):', (err as Error).message);
+    recordAuthEvent('otp_request', 'error', 'redis_unavailable');
     throw AppError.serviceUnavailable('Auth temporarily unavailable');
   }
 }
@@ -62,9 +74,9 @@ async function enforceOtpRateLimits(phone: string, ip?: string): Promise<void> {
 async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
   try {
     await Promise.all([
-      redis.del(`otp:cd:${phone}`),
-      redis.decr(`otp:ph:${phone}`),
-      ...(ip ? [redis.decr(`otp:ip:${ip}`)] : []),
+      observeRedis('del', () => redis.del(`otp:cd:${phone}`)),
+      observeRedis('decr', () => redis.decr(`otp:ph:${phone}`)),
+      ...(ip ? [observeRedis('decr', () => redis.decr(`otp:ip:${ip}`))] : []),
     ]);
   } catch (err) {
     console.error('[auth] failed to release OTP rate limits:', (err as Error).message);
@@ -88,10 +100,12 @@ export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
   } catch (err) {
     console.error('[auth] SMS send failed', err);
     await releaseOtpRateLimits(phone, ctx.ip); // don't penalize a delivery failure
+    recordAuthEvent('otp_request', 'error', 'sms_failed');
     throw new AppError(502, 'internal', 'Failed to send OTP SMS');
   }
 
   await logAuthEvent({ event: 'otp_requested', ctx, meta: { phone } });
+  recordAuthEvent('otp_request', 'success');
 
   return {
     success: true,
@@ -120,8 +134,12 @@ export async function verifyOtp(
     .orderBy(desc(otps.createdAt))
     .limit(1);
 
-  if (!otp) throw AppError.unauthorized('Invalid or expired OTP');
+  if (!otp) {
+    recordAuthEvent('otp_verify', 'error', 'missing_or_expired');
+    throw AppError.unauthorized('Invalid or expired OTP');
+  }
   if (otp.attempts >= MAX_ATTEMPTS) {
+    recordAuthEvent('otp_verify', 'blocked', 'max_attempts');
     throw AppError.rateLimited('Too many attempts - request a new OTP');
   }
 
@@ -134,6 +152,7 @@ export async function verifyOtp(
       .update(otps)
       .set({ attempts: sql`${otps.attempts} + 1` })
       .where(eq(otps.id, otp.id));
+    recordAuthEvent('otp_verify', 'error', 'invalid_code');
     throw AppError.unauthorized('Invalid or expired OTP');
   }
 
@@ -146,13 +165,17 @@ export async function verifyOtp(
       .values({ phone, name: 'Destow User', authProvider: 'phone' })
       .returning();
   }
-  if (user.status !== 'active') throw AppError.forbidden(`Account ${user.status}`);
+  if (user.status !== 'active') {
+    recordAuthEvent('login', 'blocked', user.status);
+    throw AppError.forbidden(`Account ${user.status}`);
+  }
 
   const { accessToken, refreshToken, accessTokenExpiresAt } = await createSession({
     userId: user.id,
     role: user.role,
     ctx,
   });
+  recordAuthEvent('login', 'success');
 
   return {
     accessToken,

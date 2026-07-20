@@ -1,5 +1,6 @@
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
+import { observeAsync, redisCommandDuration, redisCommandsTotal } from '../lib/metrics/metrics.js';
 
 // Hot-path store for the auth denylist (revocation) and rate-limit counters.
 // Postgres remains the durable source of truth; Redis is a rebuildable cache.
@@ -26,5 +27,16 @@ const INCR_WITH_TTL = `
 `;
 
 export async function incrWithTtl(key: string, ttlSec: number): Promise<number> {
-  return (await redis.eval(INCR_WITH_TTL, 1, key, ttlSec)) as number;
+  return observeRedis('eval_incr_with_ttl', async () => (
+    await redis.eval(INCR_WITH_TTL, 1, key, ttlSec)
+  ) as number);
+}
+
+export async function observeRedis<T>(command: string, fn: () => Promise<T>): Promise<T> {
+  return observeAsync(
+    redisCommandDuration,
+    redisCommandsTotal,
+    { command },
+    fn,
+  );
 }
