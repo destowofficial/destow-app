@@ -44,3 +44,8 @@ docker-compose.override.yml
 
 # Claude Code (local, not shared)
 .claude/
+
+# Documentation — local only, except these two
+docs/*
+!docs/ARCHITECTURE.md
+!docs/TARGETS.md

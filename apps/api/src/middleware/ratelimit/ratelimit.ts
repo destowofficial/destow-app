@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { safeError } from '../../lib/log/safe.js';
 import { incrWithTtl } from '../../db/redis.js';
 import { AppError } from '../../lib/http/errors.js';
 
@@ -15,7 +16,7 @@ export function rateLimit(opts: { keyPrefix: string; max: number; windowSec: num
     } catch (err) {
       // Fail-closed: if the limiter can't run, reject with 503 rather than let
       // an unbounded flood through (consistent with the auth denylist).
-      console.error('[ratelimit] check failed (fail-closed):', (err as Error).message);
+      console.error(`[ratelimit] check failed (fail-closed): ${safeError(err)}`);
       throw AppError.serviceUnavailable('Service temporarily unavailable');
     }
     if (count > opts.max) {

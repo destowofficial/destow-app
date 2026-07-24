@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { computeFare } from './pricing';
+import { computeFare } from '@/lib/pricing/pricing';
 
 describe('computeFare', () => {
   it('computes fare, commission and payout in integer paise', () => {
