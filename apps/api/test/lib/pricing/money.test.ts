@@ -8,7 +8,7 @@ import {
   formatPaise,
   MIN_COMMISSION_BPS,
   MAX_COMMISSION_BPS,
-} from './money';
+} from '@/lib/pricing/money';
 
 describe('money', () => {
   it('converts rupees<->paise with correct rounding', () => {

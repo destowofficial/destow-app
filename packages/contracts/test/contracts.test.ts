@@ -8,7 +8,7 @@ import {
   apiErrorSchema,
   apiSuccessSchema,
   ERROR_CODE,
-} from './index';
+} from '../src/index';
 
 describe('@destow/contracts enums', () => {
   it('booking status has the full lifecycle', () => {

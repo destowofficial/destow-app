@@ -5,7 +5,9 @@ import { users, otps } from '../../db/schema.js';
 import { redis, incrWithTtl } from '../../db/redis.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/http/errors.js';
-import { sms } from '../../lib/adapters/sms.js';
+import { safeError } from '../../lib/log/safe.js';
+import type { OtpChannel } from '@destow/contracts';
+import { deliverOtp, defaultChannel } from '../../lib/adapters/otp/index.js';
 import {
   createSession,
   logAuthEvent,
@@ -52,13 +54,13 @@ async function enforceOtpRateLimits(phone: string, ip?: string): Promise<void> {
     }
   } catch (err) {
     if (err instanceof AppError) throw err; // genuine limit hit
-    console.error('[auth] OTP rate-limit check failed (fail-closed):', (err as Error).message);
+    console.error(`[auth] OTP rate-limit check failed (fail-closed): ${safeError(err)}`);
     throw AppError.serviceUnavailable('Auth temporarily unavailable');
   }
 }
 
 // Undo the cooldown + counters when the OTP could not actually be delivered, so
-// a transient SMS failure never costs the user a wait or an hourly attempt.
+// a transient delivery failure never costs the user a wait or an hourly attempt.
 async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
   try {
     await Promise.all([
@@ -67,11 +69,15 @@ async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
       ...(ip ? [redis.decr(`otp:ip:${ip}`)] : []),
     ]);
   } catch (err) {
-    console.error('[auth] failed to release OTP rate limits:', (err as Error).message);
+    console.error(`[auth] failed to release OTP rate limits: ${safeError(err)}`);
   }
 }
 
-export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
+export async function requestOtp(
+  rawPhone: string,
+  ctx: SessionContext = {},
+  channel: OtpChannel = defaultChannel,
+) {
   const phone = normalizePhone(rawPhone);
   await enforceOtpRateLimits(phone, ctx.ip);
 
@@ -82,20 +88,24 @@ export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
   await db.delete(otps).where(eq(otps.phone, phone));
   await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
 
-  // Delivery goes through the SmsProvider adapter (SNS in prod, dev-log locally).
+  // Delivery goes through the OTP adapter: the requested channel, falling back
+  // to OTP_FALLBACK_CHANNEL if that channel errors at send time. The channel
+  // that actually accepted the message is reported back to the client.
+  let sentVia: OtpChannel;
   try {
-    await sms.sendOtp(phone, code);
+    sentVia = await deliverOtp(phone, code, channel);
   } catch (err) {
-    console.error('[auth] SMS send failed', err);
+    console.error(`[auth] OTP send failed (channel=${channel}): ${safeError(err)}`);
     await releaseOtpRateLimits(phone, ctx.ip); // don't penalize a delivery failure
-    throw new AppError(502, 'internal', 'Failed to send OTP SMS');
+    throw new AppError(502, 'internal', 'Failed to send OTP');
   }
 
-  await logAuthEvent({ event: 'otp_requested', ctx, meta: { phone } });
+  await logAuthEvent({ event: 'otp_requested', ctx, meta: { phone, channel: sentVia } });
 
   return {
     success: true,
     message: 'OTP sent',
+    channel: sentVia,
     ...(env.NODE_ENV !== 'production' ? { devCode: code } : {}),
   };
 }

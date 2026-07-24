@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { safeError } from '../log/safe.js';
 import type { ErrorCode } from '@destow/contracts';
 
 type HttpErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503;
@@ -56,6 +57,6 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     });
     return;
   }
-  console.error('[Unhandled Error]', err);
+  console.error(`[Unhandled Error] ${safeError(err)}`);
   res.status(500).json({ success: false, error: 'Internal server error', code: 'internal' });
 }

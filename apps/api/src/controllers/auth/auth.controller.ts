@@ -12,6 +12,11 @@ import { parseOrThrow } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
 import { AppError } from '../../lib/http/errors.js';
 import { env } from '../../config/env.js';
+import {
+  enabledChannels,
+  defaultChannel,
+  isChannelEnabled,
+} from '../../lib/adapters/otp/index.js';
 
 // Derive the request context (real client IP via 'trust proxy', UA, device meta)
 // attached to sessions and audit events.
@@ -25,9 +30,22 @@ function contextOf(req: Request, device?: Partial<SessionContext>): SessionConte
   };
 }
 
+// Which channels this deployment offers, so the client renders the right picker
+// instead of hardcoding a list that may not match the server.
+export async function channelsController(_req: Request, res: Response) {
+  ok(res, { channels: enabledChannels, default: defaultChannel });
+}
+
 export async function requestOtpController(req: Request, res: Response) {
-  const { phone } = parseOrThrow(requestOtpBody, req.body);
-  ok(res, await requestOtp(phone, contextOf(req)));
+  const { phone, channel } = parseOrThrow(requestOtpBody, req.body);
+  // The contract accepts any known channel; whether it's actually enabled is a
+  // per-deployment question, so reject a disabled one before generating a code.
+  if (channel !== undefined && !isChannelEnabled(channel)) {
+    throw AppError.badRequest(
+      `Channel "${channel}" is not available. Enabled: ${enabledChannels.join(', ')}`,
+    );
+  }
+  ok(res, await requestOtp(phone, contextOf(req), channel ?? defaultChannel));
 }
 
 export async function verifyOtpController(req: Request, res: Response) {
