@@ -24,6 +24,17 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "zod"
         update-types: ["version-update:semver-major"]
+      # Expo (SDK 57) owns the versions of React, react-native and its native
+      # modules. Bumping any of them independently fails `expo install --check`
+      # in mobile CI, so those PRs can never go green — they advance only via an
+      # Expo SDK upgrade, not a bot bump. (`bun audit` still flags advisories in
+      # these, so ignoring version bumps doesn't blind us to CVEs.)
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
