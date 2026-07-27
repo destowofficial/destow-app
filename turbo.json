@@ -3,7 +3,12 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      // dist/** covers the tsc/tsup packages; .next/** is the Next.js app in
+      // apps/web. Without it Turbo caches an empty output set, then reports a
+      // cache hit and restores nothing - so .next never appears and the Vercel
+      // build has no output to deploy. .next/cache is excluded: it is Next's own
+      // incremental cache, not a build artifact.
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "dev": {
       "cache": false,
