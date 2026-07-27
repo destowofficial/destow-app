@@ -2,10 +2,11 @@ import crypto from 'node:crypto';
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '../../db/connection.js';
 import { sessions, refreshTokens, authEvents, users } from '../../db/schema.js';
-import { redis } from '../../db/redis.js';
+import { redis, observeRedis } from '../../db/redis.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/http/errors.js';
 import { signAccessToken } from '../../lib/auth/jwt.js';
+import { recordAuthEvent } from '../../lib/metrics/metrics.js';
 
 // Postgres is the durable source of truth for sessions/refresh tokens; Redis
 // holds the short-lived denylist so a revoked session's still-unexpired access
@@ -64,7 +65,7 @@ export async function logAuthEvent(input: {
 // only revocation actions are logout / logout-all / reuse / ban, all of which
 // kill the whole session.
 async function denySession(sid: string): Promise<void> {
-  await redis.set(dlSidKey(sid), '1', 'EX', env.ACCESS_TOKEN_TTL_SEC);
+  await observeRedis('set', () => redis.set(dlSidKey(sid), '1', 'EX', env.ACCESS_TOKEN_TTL_SEC));
 }
 
 // Fail-closed: if we can't consult the denylist we cannot prove the session is
@@ -72,9 +73,10 @@ async function denySession(sid: string): Promise<void> {
 // token. A Redis outage degrades auth to unavailable, never to permissive.
 export async function isRevoked(sid: string): Promise<boolean> {
   try {
-    return (await redis.exists(dlSidKey(sid))) > 0;
+    return (await observeRedis('exists', () => redis.exists(dlSidKey(sid)))) > 0;
   } catch (err) {
     console.error('[auth] denylist check failed (fail-closed):', (err as Error).message);
+    recordAuthEvent('denylist_check', 'error', 'redis_unavailable');
     throw AppError.serviceUnavailable('Auth temporarily unavailable');
   }
 }
@@ -131,12 +133,24 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
     .from(refreshTokens)
     .where(eq(refreshTokens.tokenHash, hashToken(rawToken)))
     .limit(1);
-  if (!row) throw AppError.unauthorized('Invalid refresh token');
+  if (!row) {
+    recordAuthEvent('refresh', 'error', 'invalid_token');
+    throw AppError.unauthorized('Invalid refresh token');
+  }
 
   const [session] = await db.select().from(sessions).where(eq(sessions.id, row.sessionId)).limit(1);
-  if (!session || session.revokedAt) throw AppError.unauthorized('Session is no longer active');
-  if (session.expiresAt <= new Date()) throw AppError.unauthorized('Session expired');
-  if (row.expiresAt <= new Date()) throw AppError.unauthorized('Refresh token expired');
+  if (!session || session.revokedAt) {
+    recordAuthEvent('refresh', 'error', 'revoked_session');
+    throw AppError.unauthorized('Session is no longer active');
+  }
+  if (session.expiresAt <= new Date()) {
+    recordAuthEvent('refresh', 'error', 'expired_session');
+    throw AppError.unauthorized('Session expired');
+  }
+  if (row.expiresAt <= new Date()) {
+    recordAuthEvent('refresh', 'error', 'expired_token');
+    throw AppError.unauthorized('Refresh token expired');
+  }
 
   // Re-read role/status from the source of truth so a demotion/ban takes effect
   // at the next refresh (and mint the new access token with the fresh role).
@@ -148,6 +162,7 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
   if (!user) throw AppError.unauthorized('User not found');
   if (user.status !== 'active') {
     await revokeSession(session.id, 'banned', ctx);
+    recordAuthEvent('refresh', 'blocked', user.status);
     throw AppError.forbidden(`Account ${user.status}`);
   }
 
@@ -161,6 +176,7 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
     .returning({ id: refreshTokens.id });
   if (claimed.length === 0) {
     await revokeSession(session.id, 'reuse_detected', ctx);
+    recordAuthEvent('refresh', 'blocked', 'reuse_detected');
     throw AppError.unauthorized('Refresh token reuse detected - session revoked');
   }
 
@@ -174,6 +190,7 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
 
   const access = await signAccessToken({ userId: user.id, sessionId: session.id, role: user.role });
   await logAuthEvent({ userId: user.id, sessionId: session.id, event: 'refresh', ctx });
+  recordAuthEvent('refresh', 'success');
 
   return { accessToken: access.token, refreshToken, accessTokenExpiresAt: access.expiresAt };
 }
@@ -191,6 +208,9 @@ export async function revokeSession(
   await denySession(sessionId);
   if (revoked) {
     await logAuthEvent({ userId: revoked.userId, sessionId, event: reason, ctx });
+    recordAuthEvent('session_revoke', 'success', reason);
+  } else {
+    recordAuthEvent('session_revoke', 'noop', reason);
   }
 }
 
@@ -206,6 +226,7 @@ export async function revokeAllForUser(
     .returning({ id: sessions.id });
   await Promise.all(rows.map((r) => denySession(r.id)));
   await logAuthEvent({ userId, event: reason, ctx, meta: { count: rows.length } });
+  recordAuthEvent('session_revoke_all', 'success', reason);
   return rows.length;
 }
 
