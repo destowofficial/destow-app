@@ -110,7 +110,9 @@ export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
   return {
     success: true,
     message: 'OTP sent',
-    ...(env.NODE_ENV !== 'production' ? { devCode: code } : {}),
+    // Gated on its own flag, not NODE_ENV. parseEnv() refuses to boot with this
+    // enabled in production, so the code cannot leak by misconfiguration.
+    ...(env.OTP_DEV_ECHO ? { devCode: code } : {}),
   };
 }
 

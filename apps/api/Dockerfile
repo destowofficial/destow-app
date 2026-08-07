@@ -20,7 +20,7 @@ COPY packages/contracts packages/contracts
 COPY apps/api apps/api
 
 WORKDIR /app/apps/api
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
