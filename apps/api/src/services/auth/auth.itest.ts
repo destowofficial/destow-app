@@ -52,7 +52,7 @@ afterAll(async () => {
 // --- Happy-path rotation ------------------------------------------------------
 test('rotation marks old token used, issues a valid new one, bumps last_used_at', async () => {
   const user = await createUser();
-  const s = await createSession({ userId: user.id, role: user.role, ctx });
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
 
   const rotated = await rotateRefresh(s.refreshToken, ctx);
   expect(rotated.refreshToken).not.toBe(s.refreshToken);
@@ -70,7 +70,7 @@ test('rotation marks old token used, issues a valid new one, bumps last_used_at'
 // --- Reuse race (the invariant that justifies the whole exercise) -------------
 test('concurrent rotation with the same token: exactly one wins, session revoked as reuse', async () => {
   const user = await createUser();
-  const s = await createSession({ userId: user.id, role: user.role, ctx });
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
 
   const results = await Promise.allSettled([
     rotateRefresh(s.refreshToken, ctx),
@@ -90,7 +90,7 @@ test('concurrent rotation with the same token: exactly one wins, session revoked
 // --- Revoked / expired sessions reject without minting anything ---------------
 test('rotation against a revoked session 401s and mints nothing', async () => {
   const user = await createUser();
-  const s = await createSession({ userId: user.id, role: user.role, ctx });
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
   await revokeSession(s.sessionId, 'logout', ctx);
 
   await expectReject(rotateRefresh(s.refreshToken, ctx), 401);
@@ -101,7 +101,7 @@ test('rotation against a revoked session 401s and mints nothing', async () => {
 
 test('rotation against an expired session 401s', async () => {
   const user = await createUser();
-  const s = await createSession({ userId: user.id, role: user.role, ctx });
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
   await db
     .update(sessions)
     .set({ expiresAt: new Date(Date.now() - 1000) })
@@ -113,7 +113,7 @@ test('rotation against an expired session 401s', async () => {
 // --- Ban takes effect at refresh ---------------------------------------------
 test('a banned user is rejected at refresh and the session is revoked', async () => {
   const user = await createUser('active');
-  const s = await createSession({ userId: user.id, role: user.role, ctx });
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
   await db.update(users).set({ status: 'banned' }).where(eq(users.id, user.id));
 
   await expectReject(rotateRefresh(s.refreshToken, ctx), 403);

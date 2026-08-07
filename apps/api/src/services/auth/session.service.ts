@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { Client } from '@destow/contracts';
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '../../db/connection.js';
 import { sessions, refreshTokens, authEvents, users } from '../../db/schema.js';
@@ -85,6 +86,7 @@ export async function isRevoked(sid: string): Promise<boolean> {
 export async function createSession(input: {
   userId: string;
   role: string;
+  client: Client;
   ctx: SessionContext;
 }): Promise<TokenPair & { sessionId: string }> {
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 86_400_000);
@@ -96,6 +98,7 @@ export async function createSession(input: {
       deviceId: input.ctx.deviceId,
       deviceName: input.ctx.deviceName,
       platform: input.ctx.platform,
+      client: input.client,
       ip: input.ctx.ip,
       userAgent: input.ctx.userAgent,
       expiresAt,
@@ -113,6 +116,7 @@ export async function createSession(input: {
     userId: input.userId,
     sessionId: session.id,
     role: input.role,
+    client: input.client,
   });
 
   await logAuthEvent({ userId: input.userId, sessionId: session.id, event: 'login', ctx: input.ctx });
@@ -188,7 +192,14 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
     await tx.update(sessions).set({ lastUsedAt: new Date() }).where(eq(sessions.id, session.id));
   });
 
-  const access = await signAccessToken({ userId: user.id, sessionId: session.id, role: user.role });
+  // Audience comes from the stored session, never from the request - a caller
+  // must not be able to upgrade its own token to another app's audience.
+  const access = await signAccessToken({
+    userId: user.id,
+    sessionId: session.id,
+    role: user.role,
+    client: session.client,
+  });
   await logAuthEvent({ userId: user.id, sessionId: session.id, event: 'refresh', ctx });
   recordAuthEvent('refresh', 'success');
 

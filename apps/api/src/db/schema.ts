@@ -23,6 +23,7 @@ import {
   PAYMENT_STATUS,
   PAYMENT_METHOD,
   TRIP_TYPE,
+  CLIENT,
 } from '@destow/contracts';
 
 // --- Enums (values are the single source of truth in @destow/contracts) -------
@@ -37,6 +38,7 @@ export const bookingStatusEnum = pgEnum('booking_status', BOOKING_STATUS);
 export const paymentStatusEnum = pgEnum('payment_status', PAYMENT_STATUS);
 export const paymentMethodEnum = pgEnum('payment_method', PAYMENT_METHOD);
 export const tripTypeEnum = pgEnum('trip_type', TRIP_TYPE);
+export const clientEnum = pgEnum('client', CLIENT);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -239,6 +241,10 @@ export const sessions = pgTable(
     deviceId: text('device_id'), // client-supplied stable id (optional)
     deviceName: text('device_name'),
     platform: text('platform'), // 'android' | 'ios' | 'web'
+    // Which app this session belongs to. rotateRefresh re-mints the access token
+    // and needs the audience; the refresh request itself cannot be trusted to
+    // declare it. Existing rows predate the three-client split, hence the default.
+    client: clientEnum('client').notNull().default('customer_app'),
     ip: text('ip'),
     userAgent: text('user_agent'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
