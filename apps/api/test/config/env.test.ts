@@ -5,11 +5,10 @@ import { describe, it, expect } from 'bun:test';
 // sources rather than relying on the ambient environment.
 process.env.DATABASE_URL ||= 'postgres://destow:pw@localhost:5432/destow';
 process.env.JWT_SECRET ||= 'test_secret_at_least_32_characters_long';
-const { parseEnv } = await import('@/config/env.js');
+const { parseEnv, channelsWithCredentials } = await import('@/config/env.js');
 
-// A minimal *valid* environment: parseEnv now also requires the OTP hashing key
-// and refuses to boot without a signing keypair unless ephemeral keys are opted
-// into, so both belong in the baseline every OTP-channel assertion builds on.
+// A minimal *valid* environment: parseEnv requires the OTP hashing key and
+// refuses to boot without a signing keypair unless ephemeral keys are opted in.
 const base = {
   DATABASE_URL: 'postgres://destow:pw@localhost:5432/destow',
   JWT_SECRET: 'test_secret_at_least_32_characters_long',
@@ -22,91 +21,56 @@ const whatsappCreds = {
   WHATSAPP_ACCESS_TOKEN: 'token',
 };
 
-describe('parseEnv - OTP channels', () => {
-  it('defaults to the dev log channel', () => {
-    const env = parseEnv({ ...base });
-    expect(env.OTP_CHANNELS).toEqual(['log']);
-    expect(env.OTP_DEFAULT_CHANNEL).toBe('log');
+// env no longer decides WHICH channels are on - that is an admin setting in
+// platform_settings. It decides only which ones are *possible*, by whether their
+// credentials are present, so a channel can never be switched on into a provider
+// that has no way to send.
+describe('channelsWithCredentials', () => {
+  it('offers nothing when no credentials are configured', () => {
+    expect(channelsWithCredentials(parseEnv({ ...base, ALLOW_LOG_OTP_CHANNEL: 'false' }))).toEqual([]);
   });
 
-  it('splits a comma-separated list and defaults to the first channel', () => {
-    const env = parseEnv({
-      ...base,
-      ...whatsappCreds,
-      OTP_CHANNELS: 'whatsapp, telegram',
-      TELEGRAM_GATEWAY_TOKEN: 'tg',
-    });
-    expect(env.OTP_CHANNELS).toEqual(['whatsapp', 'telegram']);
-    expect(env.OTP_DEFAULT_CHANNEL).toBe('whatsapp');
+  it('offers whatsapp only when both of its credentials are present', () => {
+    const partial = parseEnv({ ...base, WHATSAPP_PHONE_NUMBER_ID: 'pnid', ALLOW_LOG_OTP_CHANNEL: 'false' });
+    expect(channelsWithCredentials(partial)).not.toContain('whatsapp');
+
+    const full = parseEnv({ ...base, ...whatsappCreds, ALLOW_LOG_OTP_CHANNEL: 'false' });
+    expect(channelsWithCredentials(full)).toContain('whatsapp');
   });
 
-  it('de-duplicates repeated channels', () => {
-    const env = parseEnv({ ...base, OTP_CHANNELS: 'log,log' });
-    expect(env.OTP_CHANNELS).toEqual(['log']);
+  it('offers telegram when the gateway token is present', () => {
+    const env = parseEnv({ ...base, TELEGRAM_GATEWAY_TOKEN: 'tg', ALLOW_LOG_OTP_CHANNEL: 'false' });
+    expect(channelsWithCredentials(env)).toEqual(['telegram']);
   });
 
-  it('rejects a typo rather than silently disabling a channel', () => {
-    expect(() => parseEnv({ ...base, OTP_CHANNELS: 'whatsap' })).toThrow(/unknown channel/i);
-  });
-
-  it('rejects an empty channel list', () => {
-    expect(() => parseEnv({ ...base, OTP_CHANNELS: ' , ' })).toThrow(/at least one channel/i);
-  });
-});
-
-describe('parseEnv - channel credentials', () => {
-  it('requires WhatsApp credentials when whatsapp is enabled', () => {
-    expect(() => parseEnv({ ...base, OTP_CHANNELS: 'whatsapp' })).toThrow(
-      /WHATSAPP_PHONE_NUMBER_ID/,
+  // 'log' has its own flag rather than riding on OTP_DEV_ECHO: printing the code
+  // to server stdout and returning it in the HTTP response are different
+  // exposures, and either can be wanted without the other.
+  it('offers the log channel only when ALLOW_LOG_OTP_CHANNEL is on', () => {
+    expect(channelsWithCredentials(parseEnv({ ...base, ALLOW_LOG_OTP_CHANNEL: 'false' }))).not.toContain(
+      'log',
     );
+    expect(channelsWithCredentials(parseEnv({ ...base, ALLOW_LOG_OTP_CHANNEL: 'true' }))).toContain('log');
   });
 
-  it('requires the gateway token when telegram is enabled', () => {
-    expect(() => parseEnv({ ...base, OTP_CHANNELS: 'telegram' })).toThrow(
-      /TELEGRAM_GATEWAY_TOKEN/,
-    );
-  });
-});
-
-describe('parseEnv - default and fallback must be enabled', () => {
-  it('rejects a default channel that is not enabled', () => {
+  // The guard that makes the whole arrangement safe: production refuses the
+  // log-channel flag at boot, so 'log' can never be available there and
+  // no admin toggle can turn it on.
+  it('cannot offer the log channel in production', () => {
     expect(() =>
       parseEnv({
         ...base,
-        ...whatsappCreds,
-        OTP_CHANNELS: 'whatsapp',
-        OTP_DEFAULT_CHANNEL: 'telegram',
+        NODE_ENV: 'production',
+        ALLOW_EPHEMERAL_JWT_KEYS: 'false',
+        JWT_PRIVATE_KEY: 'private',
+        JWT_PUBLIC_KEY: 'public',
+        ALLOW_LOG_OTP_CHANNEL: 'true',
       }),
-    ).toThrow(/OTP_DEFAULT_CHANNEL/);
-  });
-
-  it('rejects a fallback channel that is not enabled', () => {
-    expect(() =>
-      parseEnv({
-        ...base,
-        ...whatsappCreds,
-        OTP_CHANNELS: 'whatsapp',
-        OTP_FALLBACK_CHANNEL: 'telegram',
-      }),
-    ).toThrow(/OTP_FALLBACK_CHANNEL/);
+    ).toThrow(/ALLOW_LOG_OTP_CHANNEL/);
   });
 });
 
 describe('parseEnv - production guards', () => {
-  // A real deployment supplies a keypair, so it must also turn the ephemeral-key
-  // opt-out back off - parseEnv refuses *any* dev affordance in production.
-  const prod = {
-    ...base,
-    NODE_ENV: 'production',
-    ALLOW_EPHEMERAL_JWT_KEYS: 'false',
-    JWT_PRIVATE_KEY: 'private',
-    JWT_PUBLIC_KEY: 'public',
-  } as NodeJS.ProcessEnv;
-
-  it('never lets production print OTP codes to the log', () => {
-    expect(() => parseEnv({ ...prod, OTP_CHANNELS: 'log' })).toThrow(/must not include "log"/i);
-  });
-
   it('still requires the signing keypair in production', () => {
     expect(() =>
       parseEnv({
@@ -114,20 +78,20 @@ describe('parseEnv - production guards', () => {
         NODE_ENV: 'production',
         ALLOW_EPHEMERAL_JWT_KEYS: 'false',
         ...whatsappCreds,
-        OTP_CHANNELS: 'whatsapp',
       }),
     ).toThrow(/JWT_PRIVATE_KEY/);
   });
 
-  it('accepts a real production channel setup', () => {
+  it('accepts a real production setup', () => {
     const env = parseEnv({
-      ...prod,
+      ...base,
+      NODE_ENV: 'production',
+      ALLOW_EPHEMERAL_JWT_KEYS: 'false',
+      JWT_PRIVATE_KEY: 'private',
+      JWT_PUBLIC_KEY: 'public',
       ...whatsappCreds,
       TELEGRAM_GATEWAY_TOKEN: 'tg',
-      OTP_CHANNELS: 'whatsapp,telegram',
-      OTP_FALLBACK_CHANNEL: 'whatsapp',
     });
-    expect(env.OTP_DEFAULT_CHANNEL).toBe('whatsapp');
-    expect(env.OTP_FALLBACK_CHANNEL).toBe('whatsapp');
+    expect(channelsWithCredentials(env)).toEqual(['whatsapp', 'telegram']);
   });
 });

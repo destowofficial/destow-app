@@ -1,5 +1,8 @@
-import { env } from '../../../config/env.js';
 import { safeError } from '../../log/safe.js';
+import {
+  getOtpSettings,
+  type OtpDeliverySettings,
+} from '../../../services/settings/otp-settings.service.js';
 import type { OtpChannel, OtpDeliveryProvider } from './types.js';
 import { WhatsAppCloudProvider } from './whatsapp.js';
 import { TelegramGatewayProvider } from './telegram.js';
@@ -76,14 +79,46 @@ export function createOtpRegistry(config: OtpRegistryConfig): OtpRegistry {
   return { enabledChannels: channels, defaultChannel, isChannelEnabled, deliverOtp };
 }
 
-// The application-wide registry, configured from the validated environment.
-const registry = createOtpRegistry({
-  channels: env.OTP_CHANNELS,
-  defaultChannel: env.OTP_DEFAULT_CHANNEL,
-  fallbackChannel: env.OTP_FALLBACK_CHANNEL,
-});
+// --- The application-wide registry -------------------------------------------
+// Built from platform_settings rather than env, so an admin switching provider
+// takes effect without a redeploy. Rebuilt only when the resolved settings
+// actually change: constructing providers on every send would be wasteful, and
+// caching forever would ignore the toggle.
+let current: { signature: string; registry: OtpRegistry } | null = null;
 
-export const enabledChannels = registry.enabledChannels;
-export const defaultChannel = registry.defaultChannel;
-export const isChannelEnabled = registry.isChannelEnabled;
-export const deliverOtp = registry.deliverOtp;
+function signatureOf(s: OtpDeliverySettings): string {
+  return `${[...s.channels].sort().join(',')}|${s.defaultChannel}|${s.fallbackChannel ?? ''}`;
+}
+
+async function activeRegistry(): Promise<{ registry: OtpRegistry; settings: OtpDeliverySettings }> {
+  const settings = await getOtpSettings();
+  const signature = signatureOf(settings);
+  if (!current || current.signature !== signature) {
+    current = { signature, registry: createOtpRegistry(settings) };
+  }
+  return { registry: current.registry, settings };
+}
+
+// The channels a client may choose from, and the one used when it doesn't.
+export async function getEnabledChannels(): Promise<{
+  channels: OtpChannel[];
+  defaultChannel: OtpChannel;
+}> {
+  const { settings } = await activeRegistry();
+  return { channels: settings.channels, defaultChannel: settings.defaultChannel };
+}
+
+// Deliver over `channel`, or over the admin-configured default when omitted.
+// Returns the channel that actually accepted the message.
+export async function deliverOtp(
+  phone: string,
+  code: string,
+  channel?: OtpChannel,
+): Promise<OtpChannel> {
+  const { registry, settings } = await activeRegistry();
+  const target = channel ?? settings.defaultChannel;
+  if (!registry.isChannelEnabled(target)) {
+    throw new Error(`OTP channel '${target}' is not enabled`);
+  }
+  return registry.deliverOtp(phone, code, target);
+}

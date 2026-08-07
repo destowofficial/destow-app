@@ -8,7 +8,7 @@ import { AppError } from '../../lib/http/errors.js';
 import { canonicalizePhone } from '../../lib/auth/phone.js';
 import { safeError } from '../../lib/log/safe.js';
 import { CLIENT_ROLE, type OtpClient, type OtpChannel } from '@destow/contracts';
-import { deliverOtp, defaultChannel } from '../../lib/adapters/otp/index.js';
+import { deliverOtp } from '../../lib/adapters/otp/index.js';
 import { recordAuthEvent, recordRateLimitEvent } from '../../lib/metrics/metrics.js';
 import {
   createSession,
@@ -90,7 +90,7 @@ async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
 // from the requested one whenever the fallback fires.
 export async function issueOtp(
   phone: string,
-  channel: OtpChannel = defaultChannel,
+  channel?: OtpChannel,
 ): Promise<{ code: string; sentVia: OtpChannel }> {
   const code = generateOtpCode();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
@@ -99,8 +99,9 @@ export async function issueOtp(
   await db.delete(otps).where(eq(otps.phone, phone));
   await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
 
-  // Delivery goes through the OTP registry: the requested channel, falling back
-  // to OTP_FALLBACK_CHANNEL if that channel errors at send time.
+  // Delivery goes through the OTP registry: the requested channel (or the
+  // admin-configured default), falling back to the configured fallback channel
+  // if that channel errors at send time.
   const sentVia = await deliverOtp(phone, code, channel);
   return { code, sentVia };
 }
@@ -108,7 +109,7 @@ export async function issueOtp(
 export async function requestOtp(
   rawPhone: string,
   ctx: SessionContext = {},
-  channel: OtpChannel = defaultChannel,
+  channel?: OtpChannel,
 ) {
   // Canonicalize before the rate limiter so the Redis keys are keyed on the
   // canonical number - otherwise two spellings get two independent quotas.

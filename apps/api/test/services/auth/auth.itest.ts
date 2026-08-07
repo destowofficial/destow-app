@@ -7,10 +7,11 @@ import { decodeJwt } from 'jose';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
-import { users, sessions, refreshTokens } from '@/db/schema.js';
+import { users, sessions, refreshTokens, platformSettings } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
 import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
+import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -224,4 +225,55 @@ test('refresh re-mints with the audience stored on the session', async () => {
 test('requestOtp does not echo the code when OTP_DEV_ECHO is off', async () => {
   const result = await requestOtp('+919111000004', ctx);
   expect(result).not.toHaveProperty('devCode');
+});
+
+// --- Admin-selectable OTP channel ---------------------------------------------
+// The point of moving selection into platform_settings: an admin changes the row
+// and the next delivery uses the new provider, with no redeploy.
+
+test('delivery settings come from platform_settings, not the environment', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['log'],
+    otpDefaultChannel: 'log',
+  });
+  invalidateOtpSettings();
+
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual(['log']);
+  expect(settings.defaultChannel).toBe('log');
+});
+
+// A channel the admin switched on whose credentials are absent must not become
+// a provider that accepts a send and never delivers - it drops out instead.
+test('a channel without credentials is dropped even when the admin enabled it', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['whatsapp', 'log'],
+    otpDefaultChannel: 'whatsapp',
+  });
+  invalidateOtpSettings();
+
+  // The integration env configures no WhatsApp credentials, so only 'log' survives
+  // and the unusable default falls through to it.
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual(['log']);
+  expect(settings.defaultChannel).toBe('log');
+
+  // And a real send still works over the surviving channel.
+  const { sentVia } = await issueOtp('+919111000009');
+  expect(sentVia).toBe('log');
+});
+
+test('an empty settings row leaves no channel enabled rather than guessing', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['whatsapp'],
+    otpDefaultChannel: 'whatsapp',
+  });
+  invalidateOtpSettings();
+
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual([]);
+  await expect(issueOtp('+919111000010')).rejects.toThrow(/not enabled/i);
 });

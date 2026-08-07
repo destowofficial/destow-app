@@ -24,6 +24,7 @@ import {
   PAYMENT_METHOD,
   TRIP_TYPE,
   CLIENT,
+  OTP_CHANNEL,
 } from '@destow/contracts';
 
 // --- Enums (values are the single source of truth in @destow/contracts) -------
@@ -39,6 +40,7 @@ export const paymentStatusEnum = pgEnum('payment_status', PAYMENT_STATUS);
 export const paymentMethodEnum = pgEnum('payment_method', PAYMENT_METHOD);
 export const tripTypeEnum = pgEnum('trip_type', TRIP_TYPE);
 export const clientEnum = pgEnum('client', CLIENT);
+export const otpChannelEnum = pgEnum('otp_channel', OTP_CHANNEL);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -193,6 +195,18 @@ export const platformSettings = pgTable('platform_settings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   commissionBps: integer('commission_bps').notNull().default(1800), // 18%, clamp 1500-2000
   mapsProvider: text('maps_provider').notNull().default('google'),
+  // --- OTP delivery, admin-controlled ----------------------------------------
+  // Which channels are live, and which is preferred. Credentials stay in env;
+  // this row only decides what is switched on, so an admin can change provider
+  // without a redeploy. A channel whose credentials are absent is ignored when
+  // the registry is built, and the admin API must refuse to enable one.
+  otpChannels: otpChannelEnum('otp_channels')
+    .array()
+    .notNull()
+    .default(sql`ARRAY['log']::otp_channel[]`),
+  otpDefaultChannel: otpChannelEnum('otp_default_channel').notNull().default('log'),
+  // Tried when the default errors at send time. Null = no fallback.
+  otpFallbackChannel: otpChannelEnum('otp_fallback_channel'),
   updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
