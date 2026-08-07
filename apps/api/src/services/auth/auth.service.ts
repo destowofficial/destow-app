@@ -6,6 +6,7 @@ import { redis, incrWithTtl, observeRedis } from '../../db/redis.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/http/errors.js';
 import { sms } from '../../lib/adapters/sms.js';
+import { canonicalizePhone } from '../../lib/auth/phone.js';
 import { recordAuthEvent, recordRateLimitEvent } from '../../lib/metrics/metrics.js';
 import {
   createSession,
@@ -17,10 +18,6 @@ import {
 const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ATTEMPTS = 5;
 const PER_IP_HOURLY_MULTIPLIER = 10; // an IP may cover several phones (shared NAT)
-
-function normalizePhone(phone: string): string {
-  return phone.startsWith('+') ? phone : `+91${phone.replace(/\D/g, '')}`;
-}
 
 // OTPs are stored hashed (HMAC-SHA256), never plaintext.
 function hashOtp(phone: string, code: string): string {
@@ -84,7 +81,9 @@ async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
 }
 
 export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
-  const phone = normalizePhone(rawPhone);
+  // Canonicalize before the rate limiter so the Redis keys are keyed on the
+  // canonical number - otherwise two spellings get two independent quotas.
+  const phone = canonicalizePhone(rawPhone);
   await enforceOtpRateLimits(phone, ctx.ip);
 
   const code = generateOtpCode();
@@ -127,7 +126,7 @@ export async function verifyOtp(
   code: string,
   ctx: SessionContext = {},
 ): Promise<VerifyOtpResult> {
-  const phone = normalizePhone(rawPhone);
+  const phone = canonicalizePhone(rawPhone);
 
   const [otp] = await db
     .select()

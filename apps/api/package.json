@@ -13,6 +13,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:seed": "bun src/db/seed.ts",
+    "db:canonicalize-phones": "bun src/db/scripts/canonicalize-phones.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
