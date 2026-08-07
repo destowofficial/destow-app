@@ -46,7 +46,6 @@ export const envSchema = z.object({
   JWT_PUBLIC_KEY: z.string().optional(),
   JWT_KID: z.string().default('dev'),
   JWT_ISSUER: z.string().default('destow'),
-  JWT_AUDIENCE: z.string().default('destow-app'),
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(600), // 10 min
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(60),
 
