@@ -9,7 +9,8 @@ import { env } from '../../config/env.js';
 import { users, sessions, refreshTokens } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from './session.service.js';
-import { requestOtp } from './auth.service.js';
+import { requestOtp, verifyOtp, issueOtp } from './auth.service.js';
+import { decodeJwt } from 'jose';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -17,18 +18,31 @@ beforeAll(async () => {
   if (!/destow_test/.test(env.DATABASE_URL)) {
     throw new Error(`Refusing to truncate a non-test database: ${env.DATABASE_URL}`);
   }
-  await db.execute(sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, users RESTART IDENTITY CASCADE`);
+  await db.execute(
+    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, users RESTART IDENTITY CASCADE`,
+  );
+
+  // Redis holds rate-limit counters and the revocation denylist, and they
+  // outlive the process - a leftover OTP cooldown fails an unrelated test on the
+  // next run. Only ever flush a dedicated test database index, never db 0.
+  if (!/\/[1-9]\d*$/.test(env.REDIS_URL)) {
+    throw new Error(`Refusing to flush a non-test Redis database: ${env.REDIS_URL}`);
+  }
+  await redis.flushdb();
 });
 
 const ctx = { ip: '10.0.0.1', userAgent: 'itest', deviceName: 'itest', platform: 'web' };
 
 let userSeq = 0;
-async function createUser(status: 'active' | 'suspended' | 'banned' = 'active') {
+async function createUser(
+  status: 'active' | 'suspended' | 'banned' = 'active',
+  role: 'customer' | 'provider' | 'admin' = 'customer',
+) {
   userSeq += 1;
   const phone = `+91990000${String(userSeq).padStart(4, '0')}`;
   const [u] = await db
     .insert(users)
-    .values({ phone, name: 'ITest User', role: 'customer', status })
+    .values({ phone, name: 'ITest User', role, status })
     .returning();
   return u;
 }
@@ -142,4 +156,72 @@ test('requestOtp fails closed (503) when the rate limiter cannot reach Redis', a
   } finally {
     (redis as unknown as { set: unknown }).set = orig;
   }
+});
+
+// --- Client/role invariant at login -------------------------------------------
+// issueOtp returns the plaintext code directly, so none of these depend on
+// OTP_DEV_ECHO being enabled.
+
+test('an admin cannot sign in through the customer app', async () => {
+  const admin = await createUser('active', 'admin');
+  const code = await issueOtp(admin.phone);
+  await expectReject(verifyOtp(admin.phone, code, 'customer_app', ctx), 403);
+});
+
+test('an admin cannot sign in through the provider app', async () => {
+  const admin = await createUser('active', 'admin');
+  const code = await issueOtp(admin.phone);
+  await expectReject(verifyOtp(admin.phone, code, 'provider_app', ctx), 403);
+});
+
+test('a customer is refused by the provider app', async () => {
+  const user = await createUser('active', 'customer');
+  const code = await issueOtp(user.phone);
+  await expectReject(verifyOtp(user.phone, code, 'provider_app', ctx), 403);
+});
+
+test('a provider is refused by the customer app', async () => {
+  const user = await createUser('active', 'provider');
+  const code = await issueOtp(user.phone);
+  await expectReject(verifyOtp(user.phone, code, 'customer_app', ctx), 403);
+});
+
+test('an unknown number in the provider app creates no user row', async () => {
+  const phone = '+919111000001';
+  const code = await issueOtp(phone);
+  await expectReject(verifyOtp(phone, code, 'provider_app', ctx), 403);
+  const rows = await db.select().from(users).where(eq(users.phone, phone));
+  expect(rows).toHaveLength(0);
+});
+
+test('an unknown number in the customer app creates the user with the given name', async () => {
+  const phone = '+919111000002';
+  const code = await issueOtp(phone);
+  const result = await verifyOtp(phone, code, 'customer_app', ctx, { name: 'Asha Rao' });
+  expect(result.user.name).toBe('Asha Rao');
+  expect(result.user.role).toBe('customer');
+});
+
+test('the access token audience is the client that logged in', async () => {
+  const phone = '+919111000003';
+  const code = await issueOtp(phone);
+  const result = await verifyOtp(phone, code, 'customer_app', ctx);
+  expect(decodeJwt(result.accessToken).aud).toBe('customer_app');
+});
+
+// The refresh request never declares its own client; the session does. Otherwise
+// a caller could upgrade its token to another app's audience.
+test('refresh re-mints with the audience stored on the session', async () => {
+  const user = await createUser('active', 'provider');
+  const code = await issueOtp(user.phone);
+  const login = await verifyOtp(user.phone, code, 'provider_app', ctx);
+  const rotated = await rotateRefresh(login.refreshToken, ctx);
+  expect(decodeJwt(rotated.accessToken).aud).toBe('provider_app');
+});
+
+// The leak this whole slice starts from: the published image returned the real
+// OTP in the response body. test:integration sets no OTP_DEV_ECHO, so it is off.
+test('requestOtp does not echo the code when OTP_DEV_ECHO is off', async () => {
+  const result = await requestOtp('+919111000004', ctx);
+  expect(result).not.toHaveProperty('devCode');
 });
