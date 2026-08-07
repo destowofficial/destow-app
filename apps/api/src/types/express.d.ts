@@ -1,4 +1,4 @@
-import type { UserRole } from '@destow/contracts';
+import type { UserRole, Client } from '@destow/contracts';
 
 // Augment Express Request with the authenticated user set by requireAuth.
 declare global {
@@ -6,7 +6,7 @@ declare global {
     interface Request {
       userId?: string;
       sessionId?: string; // sid claim from the access token (set by requireAuth)
-      user?: { id: string; role: UserRole };
+      user?: { id: string; role: UserRole; client: Client };
     }
   }
 }

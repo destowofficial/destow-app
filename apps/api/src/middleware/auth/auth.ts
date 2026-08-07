@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { UserRole } from '@destow/contracts';
+import type { UserRole, Client } from '@destow/contracts';
 import { AppError } from '../../lib/http/errors.js';
 import { verifyAccessToken } from '../../lib/auth/jwt.js';
 import { isRevoked } from '../../services/auth/session.service.js';
@@ -28,7 +28,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 
   req.userId = claims.sub;
   req.sessionId = claims.sid;
-  req.user = { id: claims.sub, role: claims.role as UserRole };
+  req.user = { id: claims.sub, role: claims.role as UserRole, client: claims.aud };
   next();
 }
 
@@ -37,6 +37,18 @@ export function requireRole(...roles: UserRole[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user || !roles.includes(req.user.role)) {
       throw AppError.forbidden('Insufficient permissions');
+    }
+    next();
+  };
+}
+
+// Audience gate - use after requireAuth, and compose with requireRole where a
+// route is restricted by both. verifyAccessToken already rejects any audience
+// outside the client list; this narrows it to one app.
+export function requireClient(...clients: Client[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.user || !clients.includes(req.user.client)) {
+      throw AppError.forbidden('Not available to this application');
     }
     next();
   };
