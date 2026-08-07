@@ -21,11 +21,14 @@ function loadKeys(): { privateKey: crypto.KeyObject; publicKey: crypto.KeyObject
       publicKey: crypto.createPublicKey(normalizePem(env.JWT_PUBLIC_KEY)),
     };
   }
-  // Dev/test only (prod is enforced in config/env.ts): ephemeral keypair.
-  // Tokens invalidate on restart - fine locally, never in production.
+  // parseEnv() already refuses to boot here unless ALLOW_EPHEMERAL_JWT_KEYS is
+  // explicitly set, so reaching this branch is always a deliberate local choice.
+  if (!env.ALLOW_EPHEMERAL_JWT_KEYS) {
+    throw new Error('No signing keypair and ALLOW_EPHEMERAL_JWT_KEYS is not set');
+  }
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
   console.warn(
-    '[auth] No JWT_PRIVATE_KEY/JWT_PUBLIC_KEY set - generated an EPHEMERAL Ed25519 keypair (tokens invalidate on restart).',
+    '[auth] ALLOW_EPHEMERAL_JWT_KEYS - generated a throwaway Ed25519 keypair (tokens invalidate on restart).',
   );
   return { privateKey, publicKey };
 }

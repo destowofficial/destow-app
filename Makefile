@@ -69,6 +69,7 @@ validate:
 	@test -f $(API)/.env && echo "  ok   $(API)/.env present" || { echo "  ERR  $(API)/.env missing — run 'make env'"; exit 1; }
 	@grep -q '^DATABASE_URL=' $(API)/.env && echo "  ok   DATABASE_URL set" || { echo "  ERR  DATABASE_URL missing in $(API)/.env"; exit 1; }
 	@sec=$$(grep '^JWT_SECRET=' $(API)/.env | head -1 | cut -d= -f2-); if [ $${#sec} -ge 32 ]; then echo "  ok   JWT_SECRET (>=32 chars)"; else echo "  ERR  JWT_SECRET missing or <32 chars in $(API)/.env"; exit 1; fi
+	@sec=$$(grep '^OTP_HMAC_SECRET=' $(API)/.env | head -1 | cut -d= -f2-); if [ $${#sec} -ge 32 ]; then echo "  ok   OTP_HMAC_SECRET (>=32 chars)"; else echo "  ERR  OTP_HMAC_SECRET missing or <32 chars in $(API)/.env"; exit 1; fi
 	@echo "Environment OK."
 
 # --- Stack ------------------------------------------------------------------

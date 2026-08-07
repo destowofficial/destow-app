@@ -37,7 +37,7 @@ export async function verifyOtpController(req: Request, res: Response) {
     deviceName: body.deviceName,
     platform: body.platform,
   });
-  ok(res, await verifyOtp(body.phone, body.code, ctx));
+  ok(res, await verifyOtp(body.phone, body.code, body.client, ctx, { name: body.name }));
 }
 
 export async function refreshController(req: Request, res: Response) {

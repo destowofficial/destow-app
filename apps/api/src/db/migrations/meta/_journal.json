@@ -15,6 +15,13 @@
       "when": 1783766654716,
       "tag": "0001_secret_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786090344194,
+      "tag": "0002_condemned_carnage",
+      "breakpoints": true
     }
   ]
 }

@@ -16,9 +16,17 @@ const app: express.Express = express();
 app.set('trust proxy', 1);
 
 // --- Global middleware --------------------------------------------------------
+// A credentialed request forbids a wildcard origin, so the admin console needs a
+// real allowlist and `origin: true` (reflect the caller) rather than '*'.
+// parseEnv() rejects '*' unless ALLOW_WILDCARD_CORS is set, and defaults the list
+// to empty. The mobile apps are native and send no Origin, so none of this
+// affects them.
+const allowedOrigins = env.CORS_ORIGINS.split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 const corsOrigin =
-  env.CORS_ORIGINS === '*' ? '*' : env.CORS_ORIGINS.split(',').map((o) => o.trim());
-app.use(cors({ origin: corsOrigin }));
+  env.CORS_ORIGINS.trim() === '*' ? true : allowedOrigins.length > 0 ? allowedOrigins : false;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 app.use(metricsMiddleware);
 

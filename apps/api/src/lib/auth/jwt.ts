@@ -1,14 +1,18 @@
 import crypto from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
+import { CLIENT, type Client } from '@destow/contracts';
 import { env } from '../../config/env.js';
 import { privateKey, publicKey, kid } from './keys.js';
 
 // Access-token claims we rely on. `sid` ties the token to a server session so a
 // single Redis denylist entry can revoke every access token for that session.
+// `aud` is the client app, so a token minted for one app cannot be replayed
+// against another even if a role check were ever misconfigured.
 export interface AccessClaims {
   sub: string; // userId
   sid: string; // sessionId
   role: string;
+  aud: Client;
   jti: string;
   exp: number;
 }
@@ -17,6 +21,7 @@ export async function signAccessToken(input: {
   userId: string;
   sessionId: string;
   role: string;
+  client: Client;
 }): Promise<{ token: string; jti: string; expiresAt: Date }> {
   const jti = crypto.randomUUID();
   const issuedAt = Math.floor(Date.now() / 1000);
@@ -26,7 +31,7 @@ export async function signAccessToken(input: {
     .setSubject(input.userId)
     .setJti(jti)
     .setIssuer(env.JWT_ISSUER)
-    .setAudience(env.JWT_AUDIENCE)
+    .setAudience(input.client)
     .setIssuedAt(issuedAt)
     .setExpirationTime(issuedAt + env.ACCESS_TOKEN_TTL_SEC)
     .sign(privateKey);
@@ -34,17 +39,19 @@ export async function signAccessToken(input: {
 }
 
 // Verifies signature, expiry, issuer, audience, and pins alg to EdDSA
-// (rejects alg-confusion / alg:none). Throws on any failure.
+// (rejects alg-confusion / alg:none). jose rejects any `aud` outside the client
+// list; route groups narrow it further with requireClient(). Throws on failure.
 export async function verifyAccessToken(token: string): Promise<AccessClaims> {
   const { payload } = await jwtVerify(token, publicKey, {
     issuer: env.JWT_ISSUER,
-    audience: env.JWT_AUDIENCE,
+    audience: [...CLIENT],
     algorithms: ['EdDSA'],
   });
   return {
     sub: payload.sub as string,
     sid: payload.sid as string,
     role: payload.role as string,
+    aud: payload.aud as Client,
     jti: payload.jti as string,
     exp: payload.exp as number,
   };
