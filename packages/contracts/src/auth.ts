@@ -8,7 +8,19 @@ export const phoneSchema = z.string().min(8).max(15);
 export const PLATFORM = ['android', 'ios', 'web'] as const;
 export type Platform = (typeof PLATFORM)[number];
 
-export const requestOtpBody = z.object({ phone: phoneSchema });
+// Channels the OTP can be delivered over. Declared here so the request contract
+// and the server's provider registry share one source of truth and can't drift.
+// 'log' is dev-only (prints the code); 'sms' is a reserved future slot.
+export const OTP_CHANNEL = ['whatsapp', 'telegram', 'log'] as const;
+export type OtpChannel = (typeof OTP_CHANNEL)[number];
+
+// `channel` is optional: omitted means the server's default channel. Which
+// channels are actually accepted is runtime-checked against the enabled set
+// (GET /auth/channels), since that varies per deployment.
+export const requestOtpBody = z.object({
+  phone: phoneSchema,
+  channel: z.enum(OTP_CHANNEL).optional(),
+});
 
 export const verifyOtpBody = z.object({
   phone: phoneSchema,

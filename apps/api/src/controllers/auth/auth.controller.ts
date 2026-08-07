@@ -12,6 +12,7 @@ import { parseOrThrow } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
 import { AppError } from '../../lib/http/errors.js';
 import { env } from '../../config/env.js';
+import { getEnabledChannels } from '../../lib/adapters/otp/index.js';
 
 // Derive the request context (real client IP via 'trust proxy', UA, device meta)
 // attached to sessions and audit events.
@@ -25,9 +26,28 @@ function contextOf(req: Request, device?: Partial<SessionContext>): SessionConte
   };
 }
 
+// Which channels are currently switched on, so the client renders the right
+// picker instead of hardcoding a list that may not match the server. Reflects
+// the admin's setting, so it changes without a client release.
+export async function channelsController(_req: Request, res: Response) {
+  const { channels, defaultChannel } = await getEnabledChannels();
+  ok(res, { channels, default: defaultChannel });
+}
+
 export async function requestOtpController(req: Request, res: Response) {
-  const { phone } = parseOrThrow(requestOtpBody, req.body);
-  ok(res, await requestOtp(phone, contextOf(req)));
+  const { phone, channel } = parseOrThrow(requestOtpBody, req.body);
+  // The contract accepts any known channel; whether it is actually switched on
+  // is an admin setting, so reject a disabled one before generating a code.
+  if (channel !== undefined) {
+    const { channels } = await getEnabledChannels();
+    if (!channels.includes(channel)) {
+      throw AppError.badRequest(
+        `Channel "${channel}" is not available. Enabled: ${channels.join(', ')}`,
+      );
+    }
+  }
+  // Omitting the channel lets the service use the admin-configured default.
+  ok(res, await requestOtp(phone, contextOf(req), channel));
 }
 
 export async function verifyOtpController(req: Request, res: Response) {

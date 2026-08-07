@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { OTP_CHANNEL, type OtpChannel } from '@destow/contracts';
 
 // A strict string->boolean parser. z.coerce.boolean() is unusable here: it maps
 // the string "false" to `true`, which would silently switch on every dev
@@ -60,9 +61,27 @@ export const envSchema = z.object({
   // Each defaults to OFF and is checked on its own value, never on NODE_ENV, so
   // one forgotten variable can no longer grant several permissions at once.
   OTP_DEV_ECHO: envBool(false), // echo the OTP in the request-otp response
+  ALLOW_LOG_OTP_CHANNEL: envBool(false), // offer the 'log' channel (prints to stdout)
   ALLOW_EPHEMERAL_JWT_KEYS: envBool(false), // boot without a real signing keypair
   ALLOW_INSECURE_COOKIES: envBool(false), // drop Secure on the refresh cookie
   ALLOW_WILDCARD_CORS: envBool(false), // permit CORS_ORIGINS='*'
+
+  // --- OTP delivery credentials -----------------------------------------------
+  // env supplies only the secrets. WHICH channels are live, and which is default
+  // or fallback, lives in platform_settings so an admin can switch provider with
+  // no redeploy. A channel is selectable only if its credentials are present
+  // here - see channelsWithCredentials().
+
+  // WhatsApp Cloud API (Meta).
+  WHATSAPP_API_VERSION: z.string().default('v21.0'),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_TEMPLATE_NAME: z.string().default('destow_otp'),
+  WHATSAPP_TEMPLATE_LANG: z.string().default('en'),
+
+  // Telegram Gateway API.
+  TELEGRAM_GATEWAY_TOKEN: z.string().optional(),
+  TELEGRAM_SENDER_USERNAME: z.string().optional(),
 
   // Optional integrations - validated only when present.
   MAPS_API_KEY: z.string().optional(),
@@ -72,8 +91,26 @@ export const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+// Which channels this deployment *could* run, judged purely on whether their
+// credentials are present. platform_settings decides which are actually on, and
+// may only choose from this set - so a misconfigured secret surfaces as "not
+// selectable" rather than as a provider that accepts a send and never delivers.
+//
+// 'log' prints the code to stdout, so it needs no credentials but is a dev
+// affordance with its own flag - deliberately separate from OTP_DEV_ECHO, which
+// governs returning the code in the HTTP response. They are different exposures
+// and either can be wanted without the other. parseEnv refuses both in production.
+export function channelsWithCredentials(source: Env): OtpChannel[] {
+  const available: OtpChannel[] = [];
+  if (source.WHATSAPP_PHONE_NUMBER_ID && source.WHATSAPP_ACCESS_TOKEN) available.push('whatsapp');
+  if (source.TELEGRAM_GATEWAY_TOKEN) available.push('telegram');
+  if (source.ALLOW_LOG_OTP_CHANNEL) available.push('log');
+  return available;
+}
+
 const DEV_ONLY_FLAGS = [
   'OTP_DEV_ECHO',
+  'ALLOW_LOG_OTP_CHANNEL',
   'ALLOW_EPHEMERAL_JWT_KEYS',
   'ALLOW_INSECURE_COOKIES',
   'ALLOW_WILDCARD_CORS',
@@ -107,5 +144,8 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("CORS_ORIGINS='*' requires ALLOW_WILDCARD_CORS=true");
   }
 
+  // Channel selection is no longer validated here - it lives in
+  // platform_settings and is resolved against channelsWithCredentials() at
+  // delivery time, so an admin toggle needs no redeploy.
   return data;
 }

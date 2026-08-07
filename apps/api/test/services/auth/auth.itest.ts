@@ -3,14 +3,15 @@
 // .itest.ts name; run via `bun run test:integration` (which wires the env).
 import { test, expect, afterAll, beforeAll } from 'bun:test';
 import { eq, sql } from 'drizzle-orm';
-import { db, pool } from '../../db/connection.js';
-import { redis } from '../../db/redis.js';
-import { env } from '../../config/env.js';
-import { users, sessions, refreshTokens } from '../../db/schema.js';
-import { AppError } from '../../lib/http/errors.js';
-import { createSession, rotateRefresh, revokeSession, isRevoked } from './session.service.js';
-import { requestOtp, verifyOtp, issueOtp } from './auth.service.js';
 import { decodeJwt } from 'jose';
+import { db, pool } from '@/db/connection.js';
+import { redis } from '@/db/redis.js';
+import { env } from '@/config/env.js';
+import { users, sessions, refreshTokens, platformSettings } from '@/db/schema.js';
+import { AppError } from '@/lib/http/errors.js';
+import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
+import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
+import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -164,31 +165,31 @@ test('requestOtp fails closed (503) when the rate limiter cannot reach Redis', a
 
 test('an admin cannot sign in through the customer app', async () => {
   const admin = await createUser('active', 'admin');
-  const code = await issueOtp(admin.phone);
+  const { code } = await issueOtp(admin.phone);
   await expectReject(verifyOtp(admin.phone, code, 'customer_app', ctx), 403);
 });
 
 test('an admin cannot sign in through the provider app', async () => {
   const admin = await createUser('active', 'admin');
-  const code = await issueOtp(admin.phone);
+  const { code } = await issueOtp(admin.phone);
   await expectReject(verifyOtp(admin.phone, code, 'provider_app', ctx), 403);
 });
 
 test('a customer is refused by the provider app', async () => {
   const user = await createUser('active', 'customer');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   await expectReject(verifyOtp(user.phone, code, 'provider_app', ctx), 403);
 });
 
 test('a provider is refused by the customer app', async () => {
   const user = await createUser('active', 'provider');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   await expectReject(verifyOtp(user.phone, code, 'customer_app', ctx), 403);
 });
 
 test('an unknown number in the provider app creates no user row', async () => {
   const phone = '+919111000001';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   await expectReject(verifyOtp(phone, code, 'provider_app', ctx), 403);
   const rows = await db.select().from(users).where(eq(users.phone, phone));
   expect(rows).toHaveLength(0);
@@ -196,7 +197,7 @@ test('an unknown number in the provider app creates no user row', async () => {
 
 test('an unknown number in the customer app creates the user with the given name', async () => {
   const phone = '+919111000002';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   const result = await verifyOtp(phone, code, 'customer_app', ctx, { name: 'Asha Rao' });
   expect(result.user.name).toBe('Asha Rao');
   expect(result.user.role).toBe('customer');
@@ -204,7 +205,7 @@ test('an unknown number in the customer app creates the user with the given name
 
 test('the access token audience is the client that logged in', async () => {
   const phone = '+919111000003';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   const result = await verifyOtp(phone, code, 'customer_app', ctx);
   expect(decodeJwt(result.accessToken).aud).toBe('customer_app');
 });
@@ -213,7 +214,7 @@ test('the access token audience is the client that logged in', async () => {
 // a caller could upgrade its token to another app's audience.
 test('refresh re-mints with the audience stored on the session', async () => {
   const user = await createUser('active', 'provider');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   const login = await verifyOtp(user.phone, code, 'provider_app', ctx);
   const rotated = await rotateRefresh(login.refreshToken, ctx);
   expect(decodeJwt(rotated.accessToken).aud).toBe('provider_app');
@@ -224,4 +225,55 @@ test('refresh re-mints with the audience stored on the session', async () => {
 test('requestOtp does not echo the code when OTP_DEV_ECHO is off', async () => {
   const result = await requestOtp('+919111000004', ctx);
   expect(result).not.toHaveProperty('devCode');
+});
+
+// --- Admin-selectable OTP channel ---------------------------------------------
+// The point of moving selection into platform_settings: an admin changes the row
+// and the next delivery uses the new provider, with no redeploy.
+
+test('delivery settings come from platform_settings, not the environment', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['log'],
+    otpDefaultChannel: 'log',
+  });
+  invalidateOtpSettings();
+
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual(['log']);
+  expect(settings.defaultChannel).toBe('log');
+});
+
+// A channel the admin switched on whose credentials are absent must not become
+// a provider that accepts a send and never delivers - it drops out instead.
+test('a channel without credentials is dropped even when the admin enabled it', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['whatsapp', 'log'],
+    otpDefaultChannel: 'whatsapp',
+  });
+  invalidateOtpSettings();
+
+  // The integration env configures no WhatsApp credentials, so only 'log' survives
+  // and the unusable default falls through to it.
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual(['log']);
+  expect(settings.defaultChannel).toBe('log');
+
+  // And a real send still works over the surviving channel.
+  const { sentVia } = await issueOtp('+919111000009');
+  expect(sentVia).toBe('log');
+});
+
+test('an empty settings row leaves no channel enabled rather than guessing', async () => {
+  await db.delete(platformSettings);
+  await db.insert(platformSettings).values({
+    otpChannels: ['whatsapp'],
+    otpDefaultChannel: 'whatsapp',
+  });
+  invalidateOtpSettings();
+
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual([]);
+  await expect(issueOtp('+919111000010')).rejects.toThrow(/not enabled/i);
 });

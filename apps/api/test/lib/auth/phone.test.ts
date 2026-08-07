@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { canonicalizePhone } from './phone';
+import { canonicalizePhone } from '@/lib/auth/phone.js';
 
 describe('canonicalizePhone', () => {
   // Every one of these is the same person. The old normalizePhone() returned any

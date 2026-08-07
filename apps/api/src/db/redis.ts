@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { safeError } from '../lib/log/safe.js';
 import { env } from '../config/env.js';
 import { observeAsync, redisCommandDuration, redisCommandsTotal } from '../lib/metrics/metrics.js';
 
@@ -12,7 +13,7 @@ export const redis = new Redis(env.REDIS_URL, {
   enableAutoPipelining: true,
 });
 
-redis.on('error', (err) => console.error('[redis] error:', err.message));
+redis.on('error', (err) => console.error(`[redis] error: ${safeError(err)}`));
 
 // Fixed-window counter: INCR + EXPIRE run atomically inside Redis (single Lua
 // eval), so there is no window where the key can be left without a TTL. The

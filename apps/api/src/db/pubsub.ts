@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { safeError } from '../lib/log/safe.js';
 import { env } from '../config/env.js';
 
 // Redis pub/sub for cross-replica fan-out. This is what lets the API scale to
@@ -13,8 +14,8 @@ import { env } from '../config/env.js';
 const publisher = new Redis(env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 });
 const subscriber = new Redis(env.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 });
 
-publisher.on('error', (e) => console.error('[pubsub] publisher error:', e.message));
-subscriber.on('error', (e) => console.error('[pubsub] subscriber error:', e.message));
+publisher.on('error', (e) => console.error(`[pubsub] publisher error: ${safeError(e)}`));
+subscriber.on('error', (e) => console.error(`[pubsub] subscriber error: ${safeError(e)}`));
 
 type Handler = (payload: unknown, channel: string) => void;
 const handlers = new Map<string, Set<Handler>>();
@@ -32,7 +33,7 @@ subscriber.on('message', (channel, message) => {
     try {
       handler(payload, channel);
     } catch (err) {
-      console.error(`[pubsub] handler error on ${channel}:`, err);
+      console.error(`[pubsub] handler error on ${channel}: ${safeError(err)}`);
     }
   }
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { CLIENT, CLIENT_ROLE, OTP_CLIENT } from './clients';
-import { USER_ROLE } from './enums';
+import { CLIENT, CLIENT_ROLE, OTP_CLIENT } from '../src/clients';
+import { USER_ROLE } from '../src/enums';
 
 describe('clients', () => {
   it('maps every client to exactly one role', () => {

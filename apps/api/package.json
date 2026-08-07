@@ -9,7 +9,7 @@
     "start": "bun src/index.ts",
     "lint": "tsc --noEmit",
     "test": "bun test",
-    "test:integration": "DATABASE_URL=postgres://destow:destow_local@localhost:5435/destow_test JWT_SECRET=itest_secret_at_least_32_characters_long_xx OTP_HMAC_SECRET=itest_otp_hmac_at_least_32_characters_xxx ALLOW_EPHEMERAL_JWT_KEYS=true OTP_DEV_ECHO=false CORS_ORIGINS= bun src/db/migrate.ts && DATABASE_URL=postgres://destow:destow_local@localhost:5435/destow_test REDIS_URL=redis://localhost:6379/1 JWT_SECRET=itest_secret_at_least_32_characters_long_xx OTP_HMAC_SECRET=itest_otp_hmac_at_least_32_characters_xxx ALLOW_EPHEMERAL_JWT_KEYS=true OTP_DEV_ECHO=false CORS_ORIGINS= NODE_ENV=test bun test ./src/services/auth/auth.itest.ts",
+    "test:integration": "DATABASE_URL=postgres://destow:destow_local@localhost:5435/destow_test JWT_SECRET=itest_secret_at_least_32_characters_long_xx OTP_HMAC_SECRET=itest_otp_hmac_at_least_32_characters_xxx ALLOW_EPHEMERAL_JWT_KEYS=true OTP_DEV_ECHO=false ALLOW_LOG_OTP_CHANNEL=true CORS_ORIGINS= bun src/db/migrate.ts && DATABASE_URL=postgres://destow:destow_local@localhost:5435/destow_test REDIS_URL=redis://localhost:6379/1 JWT_SECRET=itest_secret_at_least_32_characters_long_xx OTP_HMAC_SECRET=itest_otp_hmac_at_least_32_characters_xxx ALLOW_EPHEMERAL_JWT_KEYS=true OTP_DEV_ECHO=false ALLOW_LOG_OTP_CHANNEL=true CORS_ORIGINS= NODE_ENV=test bun test ./test/services/auth/auth.itest.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/migrate.ts",
     "db:seed": "bun src/db/seed.ts",
@@ -17,7 +17,6 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@aws-sdk/client-sns": "^3.1045.0",
     "@destow/contracts": "*",
     "cors": "^2.8.6",
     "drizzle-orm": "^0.45.2",

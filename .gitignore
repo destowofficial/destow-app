@@ -45,5 +45,7 @@ docker-compose.override.yml
 # Claude Code (local, not shared)
 .claude/
 
-# Superpowers working docs (specs, plans) — local, not shared
-docs/superpowers/
+# Documentation — local only (incl. superpowers specs/plans), except these two
+docs/*
+!docs/ARCHITECTURE.md
+!docs/TARGETS.md

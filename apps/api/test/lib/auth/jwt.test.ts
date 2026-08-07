@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import { decodeJwt, SignJWT } from 'jose';
-import { signAccessToken, verifyAccessToken } from './jwt';
-import { privateKey, kid } from './keys';
-import { env } from '../../config/env';
+import { signAccessToken, verifyAccessToken } from '@/lib/auth/jwt.js';
+import { privateKey, kid } from '@/lib/auth/keys.js';
+import { env } from '@/config/env.js';
 
 const base = { userId: 'u-1', sessionId: 's-1', role: 'customer' } as const;
 

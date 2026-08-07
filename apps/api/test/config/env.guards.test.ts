@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseEnv } from './env.schema';
+import { parseEnv } from '@/config/env.schema.js';
 
 // A minimal valid environment. Each test overrides exactly one key so every
 // assertion is about a single variable.
