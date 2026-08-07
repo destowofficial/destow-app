@@ -28,6 +28,7 @@ services:
       REDIS_URL: redis://redis:6379
       # OTP HMAC secret (token signing uses an Ed25519 keypair; dev auto-generates one).
       JWT_SECRET: local_dev_jwt_secret_at_least_32_characters_long
+      OTP_HMAC_SECRET: local_dev_otp_hmac_secret_at_least_32_characters
       AWS_REGION: ap-south-1
       CORS_ORIGINS: "*"
       # Local-only affordances. The image now defaults to NODE_ENV=production and

@@ -28,7 +28,12 @@ export const envSchema = z.object({
   // SSL mode for the pg pool. Unset -> prod defaults to 'no-verify', else 'disable'.
   // Use 'require' + NODE_EXTRA_CA_CERTS (RDS CA bundle) for verified TLS in prod.
   DATABASE_SSL: z.enum(['disable', 'require', 'no-verify']).optional(),
+  // Retained only for pre-existing consumers; token signing uses the Ed25519 keypair.
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  // Key separation: one secret, one job. Rotating the OTP key must not touch
+  // anything else. Rotation invalidates in-flight OTPs, which is harmless at a
+  // five-minute TTL.
+  OTP_HMAC_SECRET: z.string().min(32, 'OTP_HMAC_SECRET must be at least 32 characters'),
   AWS_REGION: z.string().default('ap-south-1'),
   // Comma-separated browser origins. Defaults to none: the mobile apps are
   // native and send no Origin, so an empty allowlist is fully functional and

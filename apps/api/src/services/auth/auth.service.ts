@@ -19,9 +19,10 @@ const OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ATTEMPTS = 5;
 const PER_IP_HOURLY_MULTIPLIER = 10; // an IP may cover several phones (shared NAT)
 
-// OTPs are stored hashed (HMAC-SHA256), never plaintext.
+// OTPs are stored hashed (HMAC-SHA256), never plaintext, under a key used for
+// nothing else.
 function hashOtp(phone: string, code: string): string {
-  return crypto.createHmac('sha256', env.JWT_SECRET).update(`${phone}:${code}`).digest('hex');
+  return crypto.createHmac('sha256', env.OTP_HMAC_SECRET).update(`${phone}:${code}`).digest('hex');
 }
 
 function generateOtpCode(): string {

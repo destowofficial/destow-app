@@ -6,12 +6,14 @@ import { parseEnv } from './env.schema';
 const base: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://u:p@localhost:5432/destow',
   JWT_SECRET: 'x'.repeat(32),
+  OTP_HMAC_SECRET: 'y'.repeat(32),
   ALLOW_EPHEMERAL_JWT_KEYS: 'true',
 };
 
 const withKeys: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgres://u:p@localhost:5432/destow',
   JWT_SECRET: 'x'.repeat(32),
+  OTP_HMAC_SECRET: 'y'.repeat(32),
   JWT_PRIVATE_KEY: 'pem',
   JWT_PUBLIC_KEY: 'pem',
 };
@@ -61,7 +63,13 @@ describe('parseEnv production guards', () => {
   });
 
   it('requires a signing keypair unless ephemeral keys are opted into', () => {
-    const noKeys = { DATABASE_URL: base.DATABASE_URL, JWT_SECRET: base.JWT_SECRET };
+    // Everything the schema requires, minus the keypair and its opt-out flag, so
+    // this asserts the guard rather than plain schema validation.
+    const noKeys = {
+      DATABASE_URL: base.DATABASE_URL,
+      JWT_SECRET: base.JWT_SECRET,
+      OTP_HMAC_SECRET: base.OTP_HMAC_SECRET,
+    };
     expect(() => parseEnv(noKeys)).toThrow(/JWT_PRIVATE_KEY/);
   });
 
@@ -85,5 +93,27 @@ describe('parseEnv production guards', () => {
     expect(
       parseEnv({ ...base, CORS_ORIGINS: '*', ALLOW_WILDCARD_CORS: 'true' }).CORS_ORIGINS,
     ).toBe('*');
+  });
+});
+
+describe('OTP_HMAC_SECRET', () => {
+  const minimal: NodeJS.ProcessEnv = {
+    DATABASE_URL: 'postgres://u:p@localhost:5432/destow',
+    JWT_SECRET: 'x'.repeat(32),
+    ALLOW_EPHEMERAL_JWT_KEYS: 'true',
+  };
+
+  it('is required', () => {
+    expect(() => parseEnv(minimal)).toThrow(/OTP_HMAC_SECRET/);
+  });
+
+  it('must be at least 32 characters', () => {
+    expect(() => parseEnv({ ...minimal, OTP_HMAC_SECRET: 'short' })).toThrow(/OTP_HMAC_SECRET/);
+  });
+
+  it('is accepted at 32 characters', () => {
+    expect(parseEnv({ ...minimal, OTP_HMAC_SECRET: 'y'.repeat(32) }).OTP_HMAC_SECRET).toHaveLength(
+      32,
+    );
   });
 });
