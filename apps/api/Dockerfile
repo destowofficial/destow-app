@@ -1,18 +1,24 @@
 # Local test container for the Destow API.
 # Production runs the same Bun code on a VPS/ECS. Build context is the repo root.
-FROM oven/bun:1
+# Pinned to the same Bun as package.json "packageManager". The floating `1` tag
+# moves, and a newer Bun rejects a lockfile an older one wrote - which is exactly
+# what --frozen-lockfile below is meant to guarantee against. Bump both together.
+FROM oven/bun:1.3.9
 
 WORKDIR /app
 
-# Install only the api workspace (+ its contracts dep). All workspace manifests
-# are copied so --frozen-lockfile can validate the full lockfile, but --filter
-# means mobile's deps are never installed, keeping the image lean.
+# Install only the api workspace (+ its contracts dep). EVERY workspace manifest
+# must be copied or --frozen-lockfile fails: bun resolves the `apps/*` and
+# `packages/*` globs, finds a member missing, and calls the lockfile stale. Add a
+# line here whenever a workspace is added. --filter means only the api's deps are
+# actually installed, keeping the image lean.
 # --frozen-lockfile: build exactly what bun.lock pins (reproducible; can't
 # silently resolve a different/compromised version than what was audited).
 COPY package.json bun.lock ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/api/package.json apps/api/package.json
 COPY apps/mobile/package.json apps/mobile/package.json
+COPY apps/web/package.json apps/web/package.json
 RUN bun install --frozen-lockfile --filter=@destow/api
 
 # Source (contracts ships TS source — Bun imports it directly, no build step).
