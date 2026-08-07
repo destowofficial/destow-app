@@ -5,9 +5,10 @@ import { users, otps } from '../../db/schema.js';
 import { redis, incrWithTtl, observeRedis } from '../../db/redis.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/http/errors.js';
-import { sms } from '../../lib/adapters/sms.js';
 import { canonicalizePhone } from '../../lib/auth/phone.js';
-import { CLIENT_ROLE, type OtpClient } from '@destow/contracts';
+import { safeError } from '../../lib/log/safe.js';
+import { CLIENT_ROLE, type OtpClient, type OtpChannel } from '@destow/contracts';
+import { deliverOtp, defaultChannel } from '../../lib/adapters/otp/index.js';
 import { recordAuthEvent, recordRateLimitEvent } from '../../lib/metrics/metrics.js';
 import {
   createSession,
@@ -62,14 +63,14 @@ async function enforceOtpRateLimits(phone: string, ip?: string): Promise<void> {
     }
   } catch (err) {
     if (err instanceof AppError) throw err; // genuine limit hit
-    console.error('[auth] OTP rate-limit check failed (fail-closed):', (err as Error).message);
+    console.error(`[auth] OTP rate-limit check failed (fail-closed): ${safeError(err)}`);
     recordAuthEvent('otp_request', 'error', 'redis_unavailable');
     throw AppError.serviceUnavailable('Auth temporarily unavailable');
   }
 }
 
 // Undo the cooldown + counters when the OTP could not actually be delivered, so
-// a transient SMS failure never costs the user a wait or an hourly attempt.
+// a transient delivery failure never costs the user a wait or an hourly attempt.
 async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
   try {
     await Promise.all([
@@ -78,14 +79,19 @@ async function releaseOtpRateLimits(phone: string, ip?: string): Promise<void> {
       ...(ip ? [observeRedis('decr', () => redis.decr(`otp:ip:${ip}`))] : []),
     ]);
   } catch (err) {
-    console.error('[auth] failed to release OTP rate limits:', (err as Error).message);
+    console.error(`[auth] failed to release OTP rate limits: ${safeError(err)}`);
   }
 }
 
 // Hashing, storage and delivery for one OTP. Extracted so the admin password
 // step (Part 3) can send an OTP without duplicating any of it. Callers own their
 // own rate limiting - this function applies none. Expects a canonical phone.
-export async function issueOtp(phone: string): Promise<string> {
+// Returns the code plus the channel that actually accepted it, which differs
+// from the requested one whenever the fallback fires.
+export async function issueOtp(
+  phone: string,
+  channel: OtpChannel = defaultChannel,
+): Promise<{ code: string; sentVia: OtpChannel }> {
   const code = generateOtpCode();
   const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
@@ -93,33 +99,42 @@ export async function issueOtp(phone: string): Promise<string> {
   await db.delete(otps).where(eq(otps.phone, phone));
   await db.insert(otps).values({ phone, codeHash: hashOtp(phone, code), expiresAt });
 
-  // Delivery goes through the SmsProvider adapter (SNS in prod, dev-log locally).
-  await sms.sendOtp(phone, code);
-  return code;
+  // Delivery goes through the OTP registry: the requested channel, falling back
+  // to OTP_FALLBACK_CHANNEL if that channel errors at send time.
+  const sentVia = await deliverOtp(phone, code, channel);
+  return { code, sentVia };
 }
 
-export async function requestOtp(rawPhone: string, ctx: SessionContext = {}) {
+export async function requestOtp(
+  rawPhone: string,
+  ctx: SessionContext = {},
+  channel: OtpChannel = defaultChannel,
+) {
   // Canonicalize before the rate limiter so the Redis keys are keyed on the
   // canonical number - otherwise two spellings get two independent quotas.
   const phone = canonicalizePhone(rawPhone);
   await enforceOtpRateLimits(phone, ctx.ip);
 
   let code: string;
+  let sentVia: OtpChannel;
   try {
-    code = await issueOtp(phone);
+    ({ code, sentVia } = await issueOtp(phone, channel));
   } catch (err) {
-    console.error('[auth] SMS send failed', err);
+    console.error(`[auth] OTP send failed (channel=${channel}): ${safeError(err)}`);
     await releaseOtpRateLimits(phone, ctx.ip); // don't penalize a delivery failure
-    recordAuthEvent('otp_request', 'error', 'sms_failed');
-    throw new AppError(502, 'internal', 'Failed to send OTP SMS');
+    recordAuthEvent('otp_request', 'error', 'send_failed');
+    throw new AppError(502, 'internal', 'Failed to send OTP');
   }
 
-  await logAuthEvent({ event: 'otp_requested', ctx, meta: { phone } });
+  await logAuthEvent({ event: 'otp_requested', ctx, meta: { phone, channel: sentVia } });
   recordAuthEvent('otp_request', 'success');
 
   return {
     success: true,
     message: 'OTP sent',
+    // The channel that accepted the message, so the client can say "sent via
+    // WhatsApp" rather than guessing.
+    channel: sentVia,
     // Gated on its own flag, not NODE_ENV. parseEnv() refuses to boot with this
     // enabled in production, so the code cannot leak by misconfiguration.
     ...(env.OTP_DEV_ECHO ? { devCode: code } : {}),

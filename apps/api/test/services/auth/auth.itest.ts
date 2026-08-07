@@ -3,14 +3,14 @@
 // .itest.ts name; run via `bun run test:integration` (which wires the env).
 import { test, expect, afterAll, beforeAll } from 'bun:test';
 import { eq, sql } from 'drizzle-orm';
-import { db, pool } from '../../db/connection.js';
-import { redis } from '../../db/redis.js';
-import { env } from '../../config/env.js';
-import { users, sessions, refreshTokens } from '../../db/schema.js';
-import { AppError } from '../../lib/http/errors.js';
-import { createSession, rotateRefresh, revokeSession, isRevoked } from './session.service.js';
-import { requestOtp, verifyOtp, issueOtp } from './auth.service.js';
 import { decodeJwt } from 'jose';
+import { db, pool } from '@/db/connection.js';
+import { redis } from '@/db/redis.js';
+import { env } from '@/config/env.js';
+import { users, sessions, refreshTokens } from '@/db/schema.js';
+import { AppError } from '@/lib/http/errors.js';
+import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
+import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.

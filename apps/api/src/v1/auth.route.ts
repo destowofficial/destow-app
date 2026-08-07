@@ -1,5 +1,6 @@
 import express from 'express';
 import {
+  channelsController,
   requestOtpController,
   verifyOtpController,
   refreshController,
@@ -20,6 +21,8 @@ const otpRequestLimiter = rateLimit({ keyPrefix: 'otp_req', max: 60, windowSec: 
 const otpVerifyLimiter = rateLimit({ keyPrefix: 'otp_verify', max: 60, windowSec: 3600 });
 const authLimiter = rateLimit({ keyPrefix: 'auth', max: 120, windowSec: 3600 });
 
+// Static per-deployment config the login screen reads before showing the picker.
+authRouter.get('/channels', authLimiter, channelsController);
 authRouter.post('/request-otp', otpRequestLimiter, requestOtpController);
 authRouter.post('/verify-otp', otpVerifyLimiter, verifyOtpController);
 authRouter.post('/refresh', authLimiter, refreshController);

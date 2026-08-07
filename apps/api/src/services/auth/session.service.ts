@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Client } from '@destow/contracts';
+import { safeError } from '../../lib/log/safe.js';
 import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import { db } from '../../db/connection.js';
 import { sessions, refreshTokens, authEvents, users } from '../../db/schema.js';
@@ -56,7 +57,7 @@ export async function logAuthEvent(input: {
     });
   } catch (err) {
     // Audit is best-effort - never fail an auth operation because logging failed.
-    console.error('[auth] failed to write auth_event', err);
+    console.error(`[auth] failed to write auth_event: ${safeError(err)}`);
   }
 }
 
@@ -76,7 +77,7 @@ export async function isRevoked(sid: string): Promise<boolean> {
   try {
     return (await observeRedis('exists', () => redis.exists(dlSidKey(sid)))) > 0;
   } catch (err) {
-    console.error('[auth] denylist check failed (fail-closed):', (err as Error).message);
+    console.error(`[auth] denylist check failed (fail-closed): ${safeError(err)}`);
     recordAuthEvent('denylist_check', 'error', 'redis_unavailable');
     throw AppError.serviceUnavailable('Auth temporarily unavailable');
   }
