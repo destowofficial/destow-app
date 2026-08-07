@@ -7,9 +7,14 @@ process.env.DATABASE_URL ||= 'postgres://destow:pw@localhost:5432/destow';
 process.env.JWT_SECRET ||= 'test_secret_at_least_32_characters_long';
 const { parseEnv } = await import('@/config/env.js');
 
+// A minimal *valid* environment: parseEnv now also requires the OTP hashing key
+// and refuses to boot without a signing keypair unless ephemeral keys are opted
+// into, so both belong in the baseline every OTP-channel assertion builds on.
 const base = {
   DATABASE_URL: 'postgres://destow:pw@localhost:5432/destow',
   JWT_SECRET: 'test_secret_at_least_32_characters_long',
+  OTP_HMAC_SECRET: 'test_otp_hmac_at_least_32_characters_long',
+  ALLOW_EPHEMERAL_JWT_KEYS: 'true',
 } as NodeJS.ProcessEnv;
 
 const whatsappCreds = {
@@ -88,9 +93,12 @@ describe('parseEnv - default and fallback must be enabled', () => {
 });
 
 describe('parseEnv - production guards', () => {
+  // A real deployment supplies a keypair, so it must also turn the ephemeral-key
+  // opt-out back off - parseEnv refuses *any* dev affordance in production.
   const prod = {
     ...base,
     NODE_ENV: 'production',
+    ALLOW_EPHEMERAL_JWT_KEYS: 'false',
     JWT_PRIVATE_KEY: 'private',
     JWT_PUBLIC_KEY: 'public',
   } as NodeJS.ProcessEnv;
@@ -101,7 +109,13 @@ describe('parseEnv - production guards', () => {
 
   it('still requires the signing keypair in production', () => {
     expect(() =>
-      parseEnv({ ...base, NODE_ENV: 'production', ...whatsappCreds, OTP_CHANNELS: 'whatsapp' }),
+      parseEnv({
+        ...base,
+        NODE_ENV: 'production',
+        ALLOW_EPHEMERAL_JWT_KEYS: 'false',
+        ...whatsappCreds,
+        OTP_CHANNELS: 'whatsapp',
+      }),
     ).toThrow(/JWT_PRIVATE_KEY/);
   });
 

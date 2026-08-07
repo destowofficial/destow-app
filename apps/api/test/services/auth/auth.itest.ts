@@ -164,31 +164,31 @@ test('requestOtp fails closed (503) when the rate limiter cannot reach Redis', a
 
 test('an admin cannot sign in through the customer app', async () => {
   const admin = await createUser('active', 'admin');
-  const code = await issueOtp(admin.phone);
+  const { code } = await issueOtp(admin.phone);
   await expectReject(verifyOtp(admin.phone, code, 'customer_app', ctx), 403);
 });
 
 test('an admin cannot sign in through the provider app', async () => {
   const admin = await createUser('active', 'admin');
-  const code = await issueOtp(admin.phone);
+  const { code } = await issueOtp(admin.phone);
   await expectReject(verifyOtp(admin.phone, code, 'provider_app', ctx), 403);
 });
 
 test('a customer is refused by the provider app', async () => {
   const user = await createUser('active', 'customer');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   await expectReject(verifyOtp(user.phone, code, 'provider_app', ctx), 403);
 });
 
 test('a provider is refused by the customer app', async () => {
   const user = await createUser('active', 'provider');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   await expectReject(verifyOtp(user.phone, code, 'customer_app', ctx), 403);
 });
 
 test('an unknown number in the provider app creates no user row', async () => {
   const phone = '+919111000001';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   await expectReject(verifyOtp(phone, code, 'provider_app', ctx), 403);
   const rows = await db.select().from(users).where(eq(users.phone, phone));
   expect(rows).toHaveLength(0);
@@ -196,7 +196,7 @@ test('an unknown number in the provider app creates no user row', async () => {
 
 test('an unknown number in the customer app creates the user with the given name', async () => {
   const phone = '+919111000002';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   const result = await verifyOtp(phone, code, 'customer_app', ctx, { name: 'Asha Rao' });
   expect(result.user.name).toBe('Asha Rao');
   expect(result.user.role).toBe('customer');
@@ -204,7 +204,7 @@ test('an unknown number in the customer app creates the user with the given name
 
 test('the access token audience is the client that logged in', async () => {
   const phone = '+919111000003';
-  const code = await issueOtp(phone);
+  const { code } = await issueOtp(phone);
   const result = await verifyOtp(phone, code, 'customer_app', ctx);
   expect(decodeJwt(result.accessToken).aud).toBe('customer_app');
 });
@@ -213,7 +213,7 @@ test('the access token audience is the client that logged in', async () => {
 // a caller could upgrade its token to another app's audience.
 test('refresh re-mints with the audience stored on the session', async () => {
   const user = await createUser('active', 'provider');
-  const code = await issueOtp(user.phone);
+  const { code } = await issueOtp(user.phone);
   const login = await verifyOtp(user.phone, code, 'provider_app', ctx);
   const rotated = await rotateRefresh(login.refreshToken, ctx);
   expect(decodeJwt(rotated.accessToken).aud).toBe('provider_app');

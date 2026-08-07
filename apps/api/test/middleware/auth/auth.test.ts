@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import type { Request, Response, NextFunction } from 'express';
-import { requireRole, requireClient } from './auth';
+import { requireRole, requireClient } from '@/middleware/auth/auth.js';
 
 // Minimal fakes - these gates read only req.user and call next().
 function reqWith(user?: { id: string; role: string; client: string }) {
