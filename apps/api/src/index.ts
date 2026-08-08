@@ -27,7 +27,18 @@ const allowedOrigins = env.CORS_ORIGINS.split(',')
 const corsOrigin =
   env.CORS_ORIGINS.trim() === '*' ? true : allowedOrigins.length > 0 ? allowedOrigins : false;
 app.use(cors({ origin: corsOrigin, credentials: true }));
-app.use(express.json());
+// Webhook signatures are computed over the exact bytes the gateway sent, so a
+// re-serialized JSON object will not verify. Keep the raw body, but only for
+// webhook paths - holding it for every request is needless memory.
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      if (req.url?.includes('/webhooks/')) {
+        (req as express.Request & { rawBody?: string }).rawBody = buf.toString('utf8');
+      }
+    },
+  }),
+);
 app.use(metricsMiddleware);
 
 // --- Health -------------------------------------------------------------------

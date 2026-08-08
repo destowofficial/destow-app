@@ -4,6 +4,8 @@ import {
   listBookingsController,
   getBookingController,
   cancelBookingController,
+  startPaymentController,
+  confirmPaymentController,
 } from '../controllers/bookings/bookings.controller.js';
 import { requireAuth, requireRole, requireClient } from '../middleware/auth/auth.js';
 
@@ -18,3 +20,8 @@ bookingsRouter.post('/', createBookingController);
 bookingsRouter.get('/', listBookingsController);
 bookingsRouter.get('/:id', getBookingController);
 bookingsRouter.post('/:id/cancel', cancelBookingController);
+
+// Pay opens (or reuses) a gateway order; confirm settles it against a signature
+// the gateway produced. The amount is never in either request.
+bookingsRouter.post('/:id/pay', startPaymentController);
+bookingsRouter.post('/:id/pay/confirm', confirmPaymentController);
