@@ -223,7 +223,11 @@ export const bookings = pgTable(
     status: bookingStatusEnum('status').notNull().default('pending'),
     paymentStatus: paymentStatusEnum('payment_status').notNull().default('pending'),
     paymentMethod: paymentMethodEnum('payment_method'),
-    transactionRef: text('transaction_ref'),
+    transactionRef: text('transaction_ref'), // gateway payment id
+    // The gateway order this booking is being paid through. Webhooks arrive
+    // keyed on the order, not the booking, so this is how one is found.
+    paymentOrderId: text('payment_order_id'),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
     // Commission accrues on completion, so this is the date the revenue belongs
     // to. createdAt is when the trip was booked, which can be months earlier and
     // is the wrong answer for a monthly statement.
@@ -240,6 +244,7 @@ export const bookings = pgTable(
     index('bookings_vehicle_idx').on(t.vehicleId),
     index('bookings_status_idx').on(t.status),
     index('bookings_payment_status_idx').on(t.paymentStatus),
+    uniqueIndex('bookings_payment_order_uidx').on(t.paymentOrderId),
   ],
 );
 

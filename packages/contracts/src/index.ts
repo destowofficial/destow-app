@@ -13,3 +13,4 @@ export * from './search';
 export * from './fleet';
 export * from './bookings';
 export * from './fulfilment';
+export * from './payments';
