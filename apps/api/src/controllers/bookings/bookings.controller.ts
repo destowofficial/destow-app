@@ -4,6 +4,7 @@ import {
   createBooking,
   getMyBooking,
   listMyBookings,
+  cancelMyBooking,
 } from '../../services/bookings/bookings.service.js';
 import { parseOrThrow, uuidParam } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
@@ -26,4 +27,8 @@ export async function listBookingsController(req: Request, res: Response) {
 
 export async function getBookingController(req: Request, res: Response) {
   ok(res, { booking: await getMyBooking(callerId(req), uuidParam(req.params.id)) });
+}
+
+export async function cancelBookingController(req: Request, res: Response) {
+  ok(res, { booking: await cancelMyBooking(callerId(req), uuidParam(req.params.id)) });
 }

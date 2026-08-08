@@ -43,6 +43,13 @@
       "when": 1786170214329,
       "tag": "0005_large_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786206154497,
+      "tag": "0006_closed_thena",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   createBookingController,
   listBookingsController,
   getBookingController,
+  cancelBookingController,
 } from '../controllers/bookings/bookings.controller.js';
 import { requireAuth, requireRole, requireClient } from '../middleware/auth/auth.js';
 
@@ -16,3 +17,4 @@ bookingsRouter.use(requireAuth, requireRole('customer'), requireClient('customer
 bookingsRouter.post('/', createBookingController);
 bookingsRouter.get('/', listBookingsController);
 bookingsRouter.get('/:id', getBookingController);
+bookingsRouter.post('/:id/cancel', cancelBookingController);
