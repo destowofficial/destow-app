@@ -7,11 +7,12 @@ import { decodeJwt } from 'jose';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
-import { users, sessions, refreshTokens, platformSettings } from '@/db/schema.js';
+import { users, sessions, refreshTokens, platformSettings, customers } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
 import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
 import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
+import { getMe, updateMe } from '@/services/users/users.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -20,7 +21,7 @@ beforeAll(async () => {
     throw new Error(`Refusing to truncate a non-test database: ${env.DATABASE_URL}`);
   }
   await db.execute(
-    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, users RESTART IDENTITY CASCADE`,
   );
 
   // Redis holds rate-limit counters and the revocation denylist, and they
@@ -276,4 +277,52 @@ test('an empty settings row leaves no channel enabled rather than guessing', asy
   const settings = await getOtpSettings();
   expect(settings.channels).toEqual([]);
   await expect(issueOtp('+919111000010')).rejects.toThrow(/not enabled/i);
+});
+
+// --- Users module -------------------------------------------------------------
+// users is the shared identity; `customers` is the users module's own table and
+// is the only place customer-side data lives.
+
+test('getMe returns the profile, defaulting customer fields when no row exists', async () => {
+  const user = await createUser();
+  const me = await getMe(user.id);
+  expect(me.id).toBe(user.id);
+  expect(me.phone).toBe(user.phone);
+  expect(me.role).toBe('customer');
+  // No customers row yet - absence means "individual, nothing extra".
+  expect(me.customerType).toBe('individual');
+  expect(me.companyName).toBeNull();
+});
+
+test('getMe reads B2B details from the customers table when present', async () => {
+  const user = await createUser();
+  await db.insert(customers).values({
+    userId: user.id,
+    customerType: 'business',
+    companyName: 'Acme Logistics',
+    gstin: '29ABCDE1234F1Z5',
+  });
+  const me = await getMe(user.id);
+  expect(me.customerType).toBe('business');
+  expect(me.companyName).toBe('Acme Logistics');
+});
+
+test('updateMe changes only the fields supplied', async () => {
+  const user = await createUser();
+  const updated = await updateMe(user.id, { name: 'Asha Rao' });
+  expect(updated.name).toBe('Asha Rao');
+  expect(updated.phone).toBe(user.phone); // untouched
+  expect(updated.role).toBe('customer'); // not settable here
+});
+
+// users.email is unique, so a collision must read as a conflict rather than a 500.
+test('updateMe reports an email already in use as a conflict', async () => {
+  const first = await createUser();
+  const second = await createUser();
+  await updateMe(first.id, { email: 'taken@destow.in' });
+  await expectReject(updateMe(second.id, { email: 'taken@destow.in' }), 409);
+});
+
+test('updateMe on a missing user is a 404, not a silent success', async () => {
+  await expectReject(updateMe('00000000-0000-0000-0000-000000000000', { name: 'X' }), 404);
 });

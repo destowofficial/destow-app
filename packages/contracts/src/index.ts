@@ -6,3 +6,4 @@ export * from './enums';
 export * from './clients';
 export * from './envelope';
 export * from './auth';
+export * from './users';

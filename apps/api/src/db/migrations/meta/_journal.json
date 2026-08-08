@@ -29,6 +29,13 @@
       "when": 1786127533550,
       "tag": "0003_groovy_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786132482398,
+      "tag": "0004_easy_abomination",
+      "breakpoints": true
     }
   ]
 }

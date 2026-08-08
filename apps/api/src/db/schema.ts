@@ -61,13 +61,31 @@ export const users = pgTable(
     avatarUrl: text('avatar_url'),
     role: userRoleEnum('role').notNull().default('customer'),
     status: userStatusEnum('status').notNull().default('active'),
-    customerType: customerTypeEnum('customer_type').notNull().default('individual'),
-    companyName: text('company_name'), // B2B
-    gstin: text('gstin'), // B2B
     authProvider: text('auth_provider').notNull().default('phone'),
     ...timestamps,
   },
   (t) => [index('users_role_idx').on(t.role)],
+);
+
+// --- Customers (the users module's own table) ---------------------------------
+// users is the identity: one row per person, the login anchor every session and
+// booking points at. This table is the customer-side profile hanging off it, and
+// only the users module reads or writes it. A row exists once someone actually
+// has customer data to store (B2B details); an individual customer needs none,
+// so absence means "individual, nothing extra".
+export const customers = pgTable(
+  'customers',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    customerType: customerTypeEnum('customer_type').notNull().default('individual'),
+    companyName: text('company_name'), // B2B
+    gstin: text('gstin'), // B2B
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('customers_user_uidx').on(t.userId)],
 );
 
 // --- Service providers (agencies / fleet owners) ------------------------------
@@ -382,3 +400,11 @@ export type Rating = typeof ratings.$inferSelect;
 export type NewRating = typeof ratings.$inferInsert;
 export type Otp = typeof otps.$inferSelect;
 export type NewOtp = typeof otps.$inferInsert;
+
+// --- Customer relations -------------------------------------------------------
+export const customersRelations = relations(customers, ({ one }) => ({
+  user: one(users, { fields: [customers.userId], references: [users.id] }),
+}));
+
+export type Customer = typeof customers.$inferSelect;
+export type NewCustomer = typeof customers.$inferInsert;
