@@ -209,6 +209,11 @@ export const bookings = pgTable(
     tripType: tripTypeEnum('trip_type').notNull().default('one_way'),
     pickupDatetime: timestamp('pickup_datetime', { withTimezone: true }).notNull(),
     returnDatetime: timestamp('return_datetime', { withTimezone: true }),
+    // When the vehicle is free again. Stored rather than derived because the
+    // no-overlap exclusion constraint (see migration 0007) needs a real column
+    // to build a tstzrange from. One-way trips occupy the vehicle for the drive
+    // time; a round trip until the customer brings it back.
+    occupiedUntil: timestamp('occupied_until', { withTimezone: true }).notNull(),
     // -- Fare snapshot (frozen at creation so config changes never rewrite history) --
     pricePerKmPaise: integer('price_per_km_paise').notNull(),
     totalFarePaise: integer('total_fare_paise').notNull(),

@@ -19,6 +19,18 @@ import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
 
+// Drizzle wraps driver errors, so the Postgres SQLSTATE sits on the cause rather
+// than the thrown object.
+function sqlStateOf(err: unknown): string | undefined {
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 5; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') return code;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 // Booking creation is where a quote becomes a commitment. Everything about the
 // money is computed here and frozen onto the row: a later rate change, a
 // commission change, or a different distance from the maps provider must never
@@ -100,6 +112,14 @@ export async function createBooking(
 
   const distance = await resolveDistance(body.from, body.to);
 
+  // How long this trip takes the vehicle off the market. A round trip is held
+  // until the customer brings it back; a one-way for the drive itself. The
+  // max() guards a return date entered earlier than the journey can physically
+  // finish, which would otherwise free the vehicle mid-trip.
+  const driveEndsAt = new Date(body.pickupDatetime.getTime() + distance.durationS * 1000);
+  const occupiedUntil =
+    body.returnDatetime && body.returnDatetime > driveEndsAt ? body.returnDatetime : driveEndsAt;
+
   const [settings] = await db
     .select({ bps: platformSettings.commissionBps })
     .from(platformSettings)
@@ -116,7 +136,9 @@ export async function createBooking(
     commissionBps,
   });
 
-  const [created] = await db
+  let created: typeof bookings.$inferSelect;
+  try {
+    [created] = await db
     .insert(bookings)
     .values({
       customerUserId,
@@ -135,10 +157,20 @@ export async function createBooking(
       commissionBps: fare.commissionBps,
       commissionPaise: fare.commissionPaise,
       providerPayoutPaise: fare.providerPayoutPaise,
+      occupiedUntil,
       status: 'pending',
       paymentStatus: 'pending',
     })
     .returning();
+  } catch (err) {
+    // 23P01 is the exclusion constraint in migration 0007: this vehicle is
+    // already held for an overlapping window. The database decides this, not a
+    // prior SELECT, so two simultaneous bookings cannot both succeed.
+    if (sqlStateOf(err) === '23P01') {
+      throw AppError.conflict('That vehicle is already booked for those dates');
+    }
+    throw err;
+  }
 
   return toCustomerBooking({
     booking: created,

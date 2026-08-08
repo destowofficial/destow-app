@@ -50,6 +50,13 @@
       "when": 1786206154497,
       "tag": "0006_closed_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786206981471,
+      "tag": "0007_noisy_vampiro",
+      "breakpoints": true
     }
   ]
 }

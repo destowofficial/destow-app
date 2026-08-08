@@ -947,9 +947,15 @@ test('a customer cannot read another customer booking', async () => {
 test('history paginates with a real total and a working status filter', async () => {
   const customer = await createUser();
   const { vehicle } = await bookableVehicle(1000);
-  for (let i = 0; i < 3; i++) {
+  // A week apart each: one vehicle cannot run three trips at the same hour, and
+  // since migration 0007 the database enforces that.
+  for (let i = 1; i <= 3; i++) {
     await createBooking(customer.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+      vehicleId: vehicle.id,
+      from: 'Delhi',
+      to: 'Agra',
+      pickupDatetime: new Date(Date.now() + i * 7 * 24 * 3600 * 1000),
+      tripType: 'one_way',
     });
   }
 
@@ -1105,4 +1111,115 @@ test('a cancelled trip earns nothing', async () => {
   const earnings = await getEarnings(owner.id);
   expect(earnings.completedTrips).toBe(0);
   expect(earnings.commissionPaise).toBe(0);
+});
+
+// --- Double booking -----------------------------------------------------------
+// A vehicle is one physical car. Two customers holding it for the same dates is
+// a trip somebody does not get, discovered by the partner on the morning.
+
+const AT = (hoursFromNow: number) => new Date(Date.now() + hoursFromNow * 3600 * 1000);
+
+test('the same vehicle cannot be booked for overlapping dates', async () => {
+  const { vehicle } = await bookableVehicle(1000);
+  const alice = await createUser();
+  const bob = await createUser();
+  const pickup = AT(48);
+
+  await createBooking(alice.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+
+  await expectReject(
+    createBooking(bob.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    }),
+    409,
+  );
+});
+
+// The guard must not over-reach: a vehicle free again is bookable again.
+test('the same vehicle can be booked once the first trip is over', async () => {
+  const { vehicle } = await bookableVehicle(1000);
+  const alice = await createUser();
+  const bob = await createUser();
+
+  const first = await createBooking(alice.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(48), tripType: 'one_way',
+  });
+
+  // Well clear of the first trip's drive time.
+  const later = await createBooking(bob.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(24 * 14), tripType: 'one_way',
+  });
+  expect(later.id).not.toBe(first.id);
+});
+
+// Cancelling frees the vehicle immediately - otherwise a mistaken booking would
+// block that car for the rest of the window.
+test('cancelling releases the vehicle for someone else', async () => {
+  const { vehicle } = await bookableVehicle(1000);
+  const alice = await createUser();
+  const bob = await createUser();
+  const pickup = AT(72);
+
+  const first = await createBooking(alice.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  await expectReject(
+    createBooking(bob.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    }),
+    409,
+  );
+
+  await cancelMyBooking(alice.id, first.id);
+
+  const second = await createBooking(bob.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  expect(second.status).toBe('pending');
+});
+
+// A different car of the same type is a different car.
+test('another vehicle is unaffected by the first being held', async () => {
+  const a = await bookableVehicle(1000);
+  const b = await bookableVehicle(1100);
+  const alice = await createUser();
+  const bob = await createUser();
+  const pickup = AT(96);
+
+  await createBooking(alice.id, {
+    vehicleId: a.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  const other = await createBooking(bob.id, {
+    vehicleId: b.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  expect(other.status).toBe('pending');
+});
+
+// The reason this is a database constraint rather than a SELECT-then-INSERT:
+// both requests would read "no conflict" and both would write one.
+test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
+  const { vehicle } = await bookableVehicle(1000);
+  const alice = await createUser();
+  const bob = await createUser();
+  const pickup = AT(120);
+  const trip = { from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way' } as const;
+
+  const results = await Promise.allSettled([
+    createBooking(alice.id, { vehicleId: vehicle.id, ...trip }),
+    createBooking(bob.id, { vehicleId: vehicle.id, ...trip }),
+  ]);
+
+  expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+  expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+
+  const loser = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+  expect((loser.reason as AppError).status).toBe(409);
+
+  const held = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.vehicleId, vehicle.id), eq(bookings.status, 'pending')));
+  expect(held).toHaveLength(1);
 });
