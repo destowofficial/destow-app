@@ -7,7 +7,10 @@ import { decodeJwt } from 'jose';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
-import { users, sessions, refreshTokens, platformSettings, customers, admins } from '@/db/schema.js';
+import {
+  users, sessions, refreshTokens, platformSettings, customers, admins,
+  vehicles, vehicleTypes,
+} from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
 import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
@@ -21,6 +24,7 @@ import {
   setAdminPassword,
   updateOtpSettings,
 } from '@/services/admin/admin.service.js';
+import { searchRoute, listAvailableVehicles } from '@/services/search/search.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -29,7 +33,7 @@ beforeAll(async () => {
     throw new Error(`Refusing to truncate a non-test database: ${env.DATABASE_URL}`);
   }
   await db.execute(
-    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, admins, service_providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, admins, bookings, vehicles, vehicle_types, drivers, service_providers, users RESTART IDENTITY CASCADE`,
   );
 
   // Redis holds rate-limit counters and the revocation denylist, and they
@@ -562,4 +566,125 @@ test('OTP settings refuse a default that is not among the enabled channels', asy
     updateOtpSettings({ channels: ['log'], defaultChannel: 'whatsapp' }),
     422,
   );
+});
+
+// --- Customer quote path ------------------------------------------------------
+// The client sends only from/to. Distance comes from the maps adapter and the
+// fare from the pricing engine, so there is no number a client can send that
+// changes a price.
+
+async function approvedFleet(pricePerKmPaise: number, category: 'car' | 'bus' = 'car') {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  await setProviderStatus(provider.id, 'approved');
+  const [type] = await db
+    .insert(vehicleTypes)
+    .values({ category, name: `T${pricePerKmPaise}`, seats: 4, bags: 2 })
+    .returning();
+  const [vehicle] = await db
+    .insert(vehicles)
+    .values({
+      serviceProviderId: provider.id,
+      vehicleTypeId: type.id,
+      pricePerKmPaise,
+      status: 'approved',
+      isActive: true,
+    })
+    .returning();
+  return { provider, type, vehicle };
+}
+
+test('search returns a distance for a route without the client supplying one', async () => {
+  const route = await searchRoute('Delhi', 'Manali');
+  expect(Number.isInteger(route.distanceM)).toBe(true);
+  expect(route.distanceM).toBeGreaterThan(0);
+  expect(route.durationS).toBeGreaterThan(0);
+});
+
+// The same route must quote the same distance every time, or the price a
+// customer sees changes between the listing and the booking.
+test('the same route resolves to a stable distance', async () => {
+  const a = await searchRoute('Delhi', 'Jaipur');
+  const b = await searchRoute('Delhi', 'Jaipur');
+  expect(b.distanceM).toBe(a.distanceM);
+});
+
+test('available vehicles are priced by the server from the resolved distance', async () => {
+  const { vehicle } = await approvedFleet(1300);
+  const { route, vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
+  const mine = listed.find((v) => v.vehicleId === vehicle.id);
+  expect(mine).toBeDefined();
+  // total = price_per_km * distance, in integer paise.
+  expect(mine!.totalFarePaise).toBe(Math.round((1300 * route.distanceM) / 1000));
+  expect(mine!.pricePerKmPaise).toBe(1300);
+  expect(mine!.totalFareDisplay).toMatch(/^₹/);
+});
+
+// What Destow takes from the provider is a commercial term with the partner,
+// not a line item on a customer's quote.
+test('a quote never exposes commission or payout', async () => {
+  await approvedFleet(1500);
+  const { vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
+  expect(listed.length).toBeGreaterThan(0);
+  for (const v of listed) {
+    expect(v).not.toHaveProperty('commissionPaise');
+    expect(v).not.toHaveProperty('providerPayoutPaise');
+    expect(v).not.toHaveProperty('commissionBps');
+  }
+});
+
+// The three gates that make admin approval mean something.
+test('a pending provider fleet is not listed', async () => {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx); // stays pending
+  const [type] = await db
+    .insert(vehicleTypes)
+    .values({ category: 'car', name: 'PendingType', seats: 4, bags: 2 })
+    .returning();
+  const [v] = await db
+    .insert(vehicles)
+    .values({
+      serviceProviderId: provider.id,
+      vehicleTypeId: type.id,
+      pricePerKmPaise: 900,
+      status: 'approved',
+      isActive: true,
+    })
+    .returning();
+  const { vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
+  expect(listed.find((x) => x.vehicleId === v.id)).toBeUndefined();
+});
+
+test('an unapproved or inactive vehicle is not listed', async () => {
+  const { provider, type } = await approvedFleet(1000);
+  const [pending] = await db
+    .insert(vehicles)
+    .values({ serviceProviderId: provider.id, vehicleTypeId: type.id, pricePerKmPaise: 100, status: 'pending', isActive: true })
+    .returning();
+  const [inactive] = await db
+    .insert(vehicles)
+    .values({ serviceProviderId: provider.id, vehicleTypeId: type.id, pricePerKmPaise: 100, status: 'approved', isActive: false })
+    .returning();
+  const { vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
+  const ids = listed.map((v) => v.vehicleId);
+  expect(ids).not.toContain(pending.id);
+  expect(ids).not.toContain(inactive.id);
+});
+
+test('the category filter narrows cars from buses', async () => {
+  await approvedFleet(1100, 'car');
+  await approvedFleet(4000, 'bus');
+  const cars = await listAvailableVehicles('Delhi', 'Agra', 'car');
+  expect(cars.vehicles.every((v) => v.category === 'car')).toBe(true);
+  const buses = await listAvailableVehicles('Delhi', 'Agra', 'bus');
+  expect(buses.vehicles.every((v) => v.category === 'bus')).toBe(true);
+  expect(buses.vehicles.length).toBeGreaterThan(0);
+});
+
+test('results are cheapest first', async () => {
+  await approvedFleet(2500);
+  await approvedFleet(800);
+  const { vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
+  const fares = listed.map((v) => v.totalFarePaise);
+  expect([...fares].sort((a, b) => a - b)).toEqual(fares);
 });
