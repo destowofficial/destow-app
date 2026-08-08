@@ -88,6 +88,30 @@ export const customers = pgTable(
   (t) => [uniqueIndex('customers_user_uidx').on(t.userId)],
 );
 
+// --- Admins (the admin module's own table) ------------------------------------
+// Password material lives here, never on `users`: that row is read on every
+// login and refresh, so a hash sitting on it would ride along in any `select *`.
+// Customers and providers have no row here at all, which is what makes "most
+// accounts have no password" structural rather than a nullable column every
+// query has to remember to check.
+export const admins = pgTable(
+  'admins',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    passwordHash: text('password_hash').notNull(), // argon2id
+    passwordUpdatedAt: timestamp('password_updated_at', { withTimezone: true }),
+    // Password-step lockout, separate from the OTP attempt counter: clearing one
+    // must not clear the other, or a single factor gates both.
+    failedAttempts: integer('failed_attempts').notNull().default(0),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [uniqueIndex('admins_user_uidx').on(t.userId)],
+);
+
 // --- Service providers (agencies / fleet owners) ------------------------------
 export const serviceProviders = pgTable(
   'service_providers',
@@ -406,5 +430,7 @@ export const customersRelations = relations(customers, ({ one }) => ({
   user: one(users, { fields: [customers.userId], references: [users.id] }),
 }));
 
+export type Admin = typeof admins.$inferSelect;
+export type NewAdmin = typeof admins.$inferInsert;
 export type Customer = typeof customers.$inferSelect;
 export type NewCustomer = typeof customers.$inferInsert;

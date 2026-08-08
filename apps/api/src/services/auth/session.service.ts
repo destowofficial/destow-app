@@ -209,7 +209,7 @@ export async function rotateRefresh(rawToken: string, ctx: SessionContext): Prom
 
 export async function revokeSession(
   sessionId: string,
-  reason: 'logout' | 'logout_all' | 'reuse_detected' | 'banned',
+  reason: 'logout' | 'logout_all' | 'reuse_detected' | 'banned' | 'role_changed',
   ctx?: SessionContext,
 ): Promise<void> {
   const [revoked] = await db
@@ -228,7 +228,7 @@ export async function revokeSession(
 
 export async function revokeAllForUser(
   userId: string,
-  reason: 'logout_all' | 'banned',
+  reason: 'logout_all' | 'banned' | 'role_changed',
   ctx?: SessionContext,
 ): Promise<number> {
   const rows = await db
