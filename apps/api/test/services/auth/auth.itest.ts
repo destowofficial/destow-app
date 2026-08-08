@@ -33,6 +33,12 @@ import {
   cancelMyBooking,
 } from '@/services/bookings/bookings.service.js';
 import {
+  startPayment,
+  confirmPayment,
+  handlePaymentWebhook,
+} from '@/services/bookings/payments.service.js';
+import { stubSignature, stubWebhookSignature } from '@/lib/adapters/payments.js';
+import {
   listProviderBookings,
   acceptBooking,
   assignDriver,
@@ -1222,4 +1228,186 @@ test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
     .from(bookings)
     .where(and(eq(bookings.vehicleId, vehicle.id), eq(bookings.status, 'pending')));
   expect(held).toHaveLength(1);
+});
+
+// --- Payments -----------------------------------------------------------------
+// The amount is the fare frozen on the booking; settling is idempotent; and a
+// payment is only real if the gateway signed it.
+
+async function payableBooking(pricePerKmPaise = 1300) {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(pricePerKmPaise);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 200 * 3600 * 1000),
+    tripType: 'one_way',
+  });
+  return { customer, booking };
+}
+
+test('the payment order is for the frozen fare, not anything the client sends', async () => {
+  const { customer, booking } = await payableBooking(1300);
+  const intent = await startPayment(customer.id, booking.id);
+  expect(intent.amountPaise).toBe(booking.totalFarePaise);
+  expect(intent.alreadyPaid).toBe(false);
+  expect(intent.orderId).toMatch(/^order_/);
+});
+
+// A customer who backs out of the checkout and taps Pay again must not
+// accumulate open orders the gateway can still settle against.
+test('starting payment twice reuses the same order', async () => {
+  const { customer, booking } = await payableBooking();
+  const first = await startPayment(customer.id, booking.id);
+  const second = await startPayment(customer.id, booking.id);
+  expect(second.orderId).toBe(first.orderId);
+});
+
+test('a valid signature settles the booking', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = 'pay_test_1';
+
+  const result = await confirmPayment(
+    customer.id,
+    booking.id,
+    { orderId, paymentId, signature: stubSignature(orderId, paymentId) },
+    'upi',
+  );
+  expect(result.paymentStatus).toBe('paid');
+
+  const after = await getMyBooking(customer.id, booking.id);
+  expect(after.paymentStatus).toBe('paid');
+});
+
+// The whole integrity of the flow. Without verification a client could simply
+// claim it paid - the money equivalent of sending your own fare.
+test('a forged signature is refused and the booking stays unpaid', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+
+  await expectReject(
+    confirmPayment(customer.id, booking.id, {
+      orderId,
+      paymentId: 'pay_forged',
+      signature: 'deadbeef'.repeat(8),
+    }),
+    400,
+  );
+
+  const after = await getMyBooking(customer.id, booking.id);
+  expect(after.paymentStatus).toBe('pending');
+});
+
+// A real ₹1 payment against another order must not settle a ₹9000 booking.
+test('a signature for a different order is refused', async () => {
+  const a = await payableBooking(1000);
+  const b = await payableBooking(2500);
+  await startPayment(a.customer.id, a.booking.id);
+  const other = await startPayment(b.customer.id, b.booking.id);
+
+  const paymentId = 'pay_cheap';
+  await expectReject(
+    confirmPayment(a.customer.id, a.booking.id, {
+      orderId: other.orderId, // the cheap booking's order
+      paymentId,
+      signature: stubSignature(other.orderId, paymentId),
+    }),
+    400,
+  );
+  expect((await getMyBooking(a.customer.id, a.booking.id)).paymentStatus).toBe('pending');
+});
+
+test('confirming twice is idempotent rather than a double charge', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = 'pay_twice';
+  const sig = stubSignature(orderId, paymentId);
+
+  const first = await confirmPayment(customer.id, booking.id, { orderId, paymentId, signature: sig });
+  const second = await confirmPayment(customer.id, booking.id, { orderId, paymentId, signature: sig });
+
+  expect(first.alreadyPaid).toBe(false);
+  expect(second.alreadyPaid).toBe(true);
+  expect(second.paymentStatus).toBe('paid');
+});
+
+test('a customer cannot pay for another customer booking', async () => {
+  const { booking } = await payableBooking();
+  const stranger = await createUser();
+  await expectReject(startPayment(stranger.id, booking.id), 404);
+});
+
+test('a cancelled booking cannot be paid', async () => {
+  const { customer, booking } = await payableBooking();
+  await cancelMyBooking(customer.id, booking.id);
+  await expectReject(startPayment(customer.id, booking.id), 409);
+});
+
+// The net for a customer whose app died mid-checkout after their money moved.
+test('a signed webhook settles a booking with no customer session', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+
+  const body = JSON.stringify({
+    payload: { payment: { entity: { id: 'pay_hook', order_id: orderId, status: 'captured' } } },
+  });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(true);
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('paid');
+});
+
+test('an unsigned webhook changes nothing', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const body = JSON.stringify({
+    payload: { payment: { entity: { id: 'pay_x', order_id: orderId, status: 'captured' } } },
+  });
+
+  await expectReject(handlePaymentWebhook(body, 'not-a-signature'), 400);
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
+});
+
+// Held is not taken.
+test('an authorized-but-not-captured webhook does not settle', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const body = JSON.stringify({
+    payload: { payment: { entity: { id: 'pay_auth', order_id: orderId, status: 'authorized' } } },
+  });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
+});
+
+// A 4xx would make the gateway retry an event we will never recognise.
+test('a webhook for an unknown order is acknowledged, not errored', async () => {
+  const body = JSON.stringify({
+    payload: { payment: { entity: { id: 'pay_y', order_id: 'order_unknown', status: 'captured' } } },
+  });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+});
+
+// Client confirm and webhook can race for the same payment.
+test('confirm and webhook together settle exactly once', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = 'pay_race';
+  const body = JSON.stringify({
+    payload: { payment: { entity: { id: paymentId, order_id: orderId, status: 'captured' } } },
+  });
+
+  const [a, b] = await Promise.all([
+    confirmPayment(customer.id, booking.id, {
+      orderId, paymentId, signature: stubSignature(orderId, paymentId),
+    }),
+    handlePaymentWebhook(body, stubWebhookSignature(body)),
+  ]);
+
+  expect(a.paymentStatus).toBe('paid');
+  expect(b.handled).toBe(true);
+  // Exactly one of the two did the settling.
+  expect([a.alreadyPaid, (b as { alreadyPaid?: boolean }).alreadyPaid].filter(Boolean)).toHaveLength(1);
 });
