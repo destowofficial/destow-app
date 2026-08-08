@@ -3,6 +3,14 @@ import {
   registerProviderController,
   getMyProviderController,
 } from '../controllers/providers/providers.controller.js';
+import {
+  listVehiclesController,
+  createVehicleController,
+  updateVehicleController,
+  listDriversController,
+  createDriverController,
+  updateDriverController,
+} from '../controllers/providers/fleet.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth/auth.js';
 
 export const providersRouter: express.Router = express.Router();
@@ -17,3 +25,16 @@ providersRouter.post('/register', registerProviderController);
 
 // Everything below is for an established partner, so both gates apply.
 providersRouter.get('/me', requireRole('provider'), getMyProviderController);
+
+// --- Fleet and roster ---------------------------------------------------------
+// Everything below is the caller's own. No route takes a provider id: it is
+// resolved from the token, so there is no parameter to tamper with.
+const partnerOnly = requireRole('provider');
+
+providersRouter.get('/vehicles', partnerOnly, listVehiclesController);
+providersRouter.post('/vehicles', partnerOnly, createVehicleController);
+providersRouter.patch('/vehicles/:id', partnerOnly, updateVehicleController);
+
+providersRouter.get('/drivers', partnerOnly, listDriversController);
+providersRouter.post('/drivers', partnerOnly, createDriverController);
+providersRouter.patch('/drivers/:id', partnerOnly, updateDriverController);

@@ -4,6 +4,9 @@ import {
   adminVerifyBody,
   setUserRoleBody,
   setProviderStatusBody,
+  setVehicleStatusBody,
+  VEHICLE_STATUS,
+  type VehicleStatus,
   setAdminPasswordBody,
   otpSettingsBody,
   PROVIDER_STATUS,
@@ -14,6 +17,8 @@ import {
   setUserRole,
   setProviderStatus,
   listProviders,
+  listVehiclesForReview,
+  setVehicleStatus,
   setAdminPassword,
   updateOtpSettings,
 } from '../../services/admin/admin.service.js';
@@ -68,4 +73,17 @@ export async function setProviderStatusController(req: Request, res: Response) {
 export async function updateOtpSettingsController(req: Request, res: Response) {
   const body = parseOrThrow(otpSettingsBody, req.body);
   ok(res, { settings: await updateOtpSettings(body) });
+}
+
+export async function listVehiclesForReviewController(req: Request, res: Response) {
+  const raw = req.query.status;
+  if (raw !== undefined && !(VEHICLE_STATUS as readonly string[]).includes(String(raw))) {
+    throw AppError.badRequest(`status must be one of: ${VEHICLE_STATUS.join(', ')}`);
+  }
+  ok(res, { vehicles: await listVehiclesForReview(raw as VehicleStatus | undefined) });
+}
+
+export async function setVehicleStatusController(req: Request, res: Response) {
+  const { status } = parseOrThrow(setVehicleStatusBody, req.body);
+  ok(res, { vehicle: await setVehicleStatus(uuidParam(req.params.id), status) });
 }

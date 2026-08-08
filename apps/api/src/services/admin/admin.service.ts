@@ -1,7 +1,7 @@
 import { and, eq, ne, count } from 'drizzle-orm';
-import type { UserRole, ProviderStatus, OtpChannel } from '@destow/contracts';
+import type { UserRole, ProviderStatus, OtpChannel, VehicleStatus } from '@destow/contracts';
 import { db } from '../../db/connection.js';
-import { users, admins, serviceProviders, platformSettings } from '../../db/schema.js';
+import { users, admins, serviceProviders, platformSettings, vehicles, vehicleTypes } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
 import { hashPassword } from '../../lib/auth/password.js';
 import { revokeAllForUser, type SessionContext } from '../auth/session.service.js';
@@ -164,4 +164,40 @@ export async function updateOtpSettings(patch: OtpSettingsPatch) {
   // entry expires.
   invalidateOtpSettings();
   return values;
+}
+
+// --- Vehicle approval ---------------------------------------------------------
+// A vehicle is bookable only once an admin has approved it, so this is the gate
+// between a partner listing a car and a customer being able to hire it.
+export async function listVehiclesForReview(status?: VehicleStatus) {
+  return db
+    .select({
+      id: vehicles.id,
+      registrationNo: vehicles.registrationNo,
+      modelName: vehicles.modelName,
+      pricePerKmPaise: vehicles.pricePerKmPaise,
+      status: vehicles.status,
+      isActive: vehicles.isActive,
+      vehicleTypeName: vehicleTypes.name,
+      category: vehicleTypes.category,
+      providerId: serviceProviders.id,
+      providerName: serviceProviders.agencyName,
+      providerStatus: serviceProviders.status,
+      createdAt: vehicles.createdAt,
+    })
+    .from(vehicles)
+    .innerJoin(vehicleTypes, eq(vehicleTypes.id, vehicles.vehicleTypeId))
+    .innerJoin(serviceProviders, eq(serviceProviders.id, vehicles.serviceProviderId))
+    .where(status ? eq(vehicles.status, status) : undefined)
+    .orderBy(vehicles.createdAt);
+}
+
+export async function setVehicleStatus(vehicleId: string, status: VehicleStatus) {
+  const [updated] = await db
+    .update(vehicles)
+    .set({ status })
+    .where(eq(vehicles.id, vehicleId))
+    .returning({ id: vehicles.id, status: vehicles.status });
+  if (!updated) throw AppError.notFound('Vehicle not found');
+  return updated;
 }

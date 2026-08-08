@@ -88,3 +88,19 @@ export async function listAvailableVehicles(
 
   return { route, vehicles: priced };
 }
+
+// The admin-managed catalog a partner picks from when listing a vehicle, and a
+// customer filters by. Read-only here; the catalog itself is seeded.
+export async function listVehicleTypes() {
+  return db
+    .select({
+      id: vehicleTypes.id,
+      category: vehicleTypes.category,
+      name: vehicleTypes.name,
+      seats: vehicleTypes.seats,
+      bags: vehicleTypes.bags,
+      refPricePerKmPaise: vehicleTypes.refPricePerKmPaise,
+    })
+    .from(vehicleTypes)
+    .orderBy(vehicleTypes.category, vehicleTypes.name);
+}
