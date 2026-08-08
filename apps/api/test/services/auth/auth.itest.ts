@@ -38,7 +38,7 @@ import {
   confirmPayment,
   handlePaymentWebhook,
 } from '@/services/bookings/payments.service.js';
-import { stubSignature, stubWebhookSignature } from '@/lib/adapters/payments.js';
+import { stubSignature, stubWebhookSignature, payments } from '@/lib/adapters/payments.js';
 import {
   listProviderBookings,
   acceptBooking,
@@ -1558,4 +1558,131 @@ test('a rating can be read back, and is null before one exists', async () => {
   await rateBooking(customer.id, booking.id, { rating: 4, comment: 'Good' });
   const found = await getBookingRating(customer.id, booking.id);
   expect(found!.rating).toBe(4);
+});
+
+// --- Refunds ------------------------------------------------------------------
+// Cancelling a paid booking returns the fare, minus whatever the policy retains
+// for the partner. Free more than 24h before pickup; a fee inside that window.
+
+async function paidBooking(hoursToPickup: number, pricePerKmPaise = 1000) {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(pricePerKmPaise);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: new Date(Date.now() + hoursToPickup * 3600 * 1000),
+    tripType: 'one_way',
+  });
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = `pay_${booking.id.slice(0, 8)}`;
+  await confirmPayment(customer.id, booking.id, {
+    orderId, paymentId, signature: stubSignature(orderId, paymentId),
+  });
+  return { customer, booking };
+}
+
+async function rowFor(id: string) {
+  const [row] = await db.select().from(bookings).where(eq(bookings.id, id));
+  return row;
+}
+
+test('cancelling well before pickup refunds the whole fare', async () => {
+  const { customer, booking } = await paidBooking(72);
+  await cancelMyBooking(customer.id, booking.id);
+
+  const row = await rowFor(booking.id);
+  expect(row.status).toBe('cancelled');
+  expect(row.paymentStatus).toBe('refunded');
+  expect(row.refundPaise).toBe(booking.totalFarePaise);
+  expect(row.cancellationFeePaise).toBe(0);
+  expect(row.refundRef).toMatch(/^rfnd_/);
+});
+
+test('cancelling inside the window retains the fee for the partner', async () => {
+  const { customer, booking } = await paidBooking(2);
+  await cancelMyBooking(customer.id, booking.id);
+
+  const row = await rowFor(booking.id);
+  const expectedFee = Math.round(booking.totalFarePaise * 0.25);
+  expect(row.cancellationFeePaise).toBe(expectedFee);
+  expect(row.refundPaise).toBe(booking.totalFarePaise - expectedFee);
+  // The two halves must always reconcile to what was actually paid.
+  expect(row.refundPaise! + row.cancellationFeePaise!).toBe(booking.totalFarePaise);
+});
+
+// Commission accrues on completed trips. This trip never ran, so Destow earns
+// nothing from the cancellation - the whole fee compensates the partner.
+test('a cancellation earns Destow nothing', async () => {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  await setProviderStatus(provider.id, 'approved');
+  const before = await getEarnings(owner.id);
+
+  const { customer, booking } = await paidBooking(2);
+  await cancelMyBooking(customer.id, booking.id);
+
+  const after = await getEarnings(owner.id);
+  expect(after.commissionPaise).toBe(before.commissionPaise);
+  expect(after.completedTrips).toBe(before.completedTrips);
+});
+
+// Refunding before claiming the cancellation would let a double tap issue two
+// refunds, so the status is claimed first and the money moves once.
+test('cancelling twice refunds once', async () => {
+  const { customer, booking } = await paidBooking(72);
+  await cancelMyBooking(customer.id, booking.id);
+  await expectReject(cancelMyBooking(customer.id, booking.id), 409);
+
+  const row = await rowFor(booking.id);
+  expect(row.refundPaise).toBe(booking.totalFarePaise);
+});
+
+test('an unpaid booking cancels with no refund recorded', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 72 * 3600 * 1000), tripType: 'one_way',
+  });
+
+  await cancelMyBooking(customer.id, booking.id);
+  const row = await rowFor(booking.id);
+  expect(row.status).toBe('cancelled');
+  expect(row.paymentStatus).toBe('pending');
+  expect(row.refundPaise).toBeNull();
+});
+
+// A settled refund is a record of what happened, not a view of current policy.
+test('a later policy change does not rewrite a settled refund', async () => {
+  const { customer, booking } = await paidBooking(2);
+  await cancelMyBooking(customer.id, booking.id);
+  const settled = await rowFor(booking.id);
+
+  await db.update(platformSettings).set({ cancellationFeeBps: 1000 });
+  const after = await rowFor(booking.id);
+  expect(after.cancellationFeePaise).toBe(settled.cancellationFeePaise);
+  expect(after.refundPaise).toBe(settled.refundPaise);
+});
+
+// The trip is already called off; a gateway outage must not put the customer
+// back on it. The booking stays cancelled and visibly owed a refund.
+test('a gateway refund failure leaves the booking cancelled and owed', async () => {
+  const { customer, booking } = await paidBooking(72);
+  const original = payments.refund;
+  (payments as { refund: unknown }).refund = async () => {
+    throw new Error('gateway down');
+  };
+  try {
+    await cancelMyBooking(customer.id, booking.id);
+  } finally {
+    (payments as { refund: unknown }).refund = original;
+  }
+
+  const row = await rowFor(booking.id);
+  expect(row.status).toBe('cancelled');
+  // Still 'paid', not 'refunded' - the money has not actually moved.
+  expect(row.paymentStatus).toBe('paid');
+  expect(row.refundPaise).toBe(booking.totalFarePaise);
+  expect(row.refundRef).toBeNull();
 });
