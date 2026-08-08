@@ -94,6 +94,9 @@ export const envSchema = z.object({
   MAPS_API_KEY: z.string().optional(),
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
+  // Signs webhook bodies. Separate from the key secret in Razorpay's dashboard,
+  // so a leaked webhook secret cannot also create orders.
+  RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
