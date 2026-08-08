@@ -1017,6 +1017,11 @@ test('the full lifecycle runs and commission accrues only on completion', async 
   expect(done.status).toBe('completed');
   expect(done.completedAt).not.toBeNull();
 
+  // Earnings are paid, completed trips: a trip nobody paid for is money owed by
+  // a customer, not revenue. Settle it directly - this test is about the
+  // lifecycle, not the gateway.
+  await db.update(bookings).set({ paymentStatus: 'paid' }).where(eq(bookings.id, booking.id));
+
   const earnings = await getEarnings(owner.id);
   expect(earnings.completedTrips).toBe(1);
   expect(earnings.grossPaise).toBe(booking.totalFarePaise);
@@ -1039,6 +1044,7 @@ test('completing twice does not accrue commission twice', async () => {
   await assignDriver(owner.id, booking.id, driver.id);
   await startTrip(owner.id, booking.id);
   await completeTrip(owner.id, booking.id);
+  await db.update(bookings).set({ paymentStatus: 'paid' }).where(eq(bookings.id, booking.id));
 
   await expectReject(completeTrip(owner.id, booking.id), 409);
 
@@ -1685,4 +1691,53 @@ test('a gateway refund failure leaves the booking cancelled and owed', async () 
   expect(row.paymentStatus).toBe('paid');
   expect(row.refundPaise).toBe(booking.totalFarePaise);
   expect(row.refundRef).toBeNull();
+});
+
+// --- Round-trip pricing and earnings integrity (#33, #38) ---------------------
+
+test('a round trip is charged for both legs', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1300);
+  const pickup = new Date(Date.now() + 900 * 3600 * 1000);
+  const route = await searchRoute('Delhi', 'Agra');
+
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: pickup,
+    tripType: 'round_trip',
+    returnDatetime: new Date(pickup.getTime() + 48 * 3600 * 1000),
+  });
+
+  // Both legs: the partner drives the route twice and is paid for twice.
+  expect(booking.distanceM).toBe(route.distanceM * 2);
+  expect(booking.totalFarePaise).toBe(Math.round((1300 * route.distanceM * 2) / 1000));
+
+  const [row] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
+  expect(row.commissionPaise + row.providerPayoutPaise).toBe(row.totalFarePaise);
+});
+
+// A completed trip nobody paid for is not earnings.
+test('earnings exclude completed trips that were never paid', async () => {
+  const customer = await createUser();
+  const { owner, vehicle } = await bookableVehicle(1000);
+  const driver = await createDriver(owner.id, { name: 'Unpaid', phone: '9876500055' });
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 1000 * 3600 * 1000), tripType: 'one_way',
+  });
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id);
+
+  // Completed but unpaid.
+  expect((await getEarnings(owner.id)).completedTrips).toBe(0);
+
+  // Once it is paid, it counts.
+  await db.update(bookings).set({ paymentStatus: 'paid' }).where(eq(bookings.id, booking.id));
+  const after = await getEarnings(owner.id);
+  expect(after.completedTrips).toBe(1);
+  expect(after.grossPaise).toBe(booking.totalFarePaise);
 });

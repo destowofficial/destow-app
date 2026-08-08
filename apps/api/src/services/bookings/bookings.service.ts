@@ -137,6 +137,8 @@ export async function createBooking(
     pricePerKmPaise: found.vehicle.pricePerKmPaise,
     distanceM: distance.distanceM,
     commissionBps,
+    // A round trip is both legs, so the charged distance is twice the route.
+    tripType: body.tripType,
   });
 
   let created: typeof bookings.$inferSelect;
@@ -150,7 +152,7 @@ export async function createBooking(
       vehicleTypeId: found.type.id,
       fromLocation: body.from,
       toLocation: body.to,
-      distanceM: distance.distanceM,
+      distanceM: fare.distanceM,
       tripType: body.tripType,
       pickupDatetime: body.pickupDatetime,
       returnDatetime: body.returnDatetime,

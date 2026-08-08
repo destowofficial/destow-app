@@ -176,7 +176,16 @@ export async function getEarnings(userId: string): Promise<ProviderEarnings> {
       net: sum(bookings.providerPayoutPaise),
     })
     .from(bookings)
-    .where(and(eq(bookings.serviceProviderId, providerId), eq(bookings.status, 'completed')));
+    .where(
+      and(
+        eq(bookings.serviceProviderId, providerId),
+        eq(bookings.status, 'completed'),
+        // A completed trip nobody paid for is not earnings. Counting it would
+        // show a partner money that is owed by a customer, not by Destow, and
+        // would overstate commission on the platform's side too.
+        eq(bookings.paymentStatus, 'paid'),
+      ),
+    );
 
   // sum() returns null over an empty set and a string for bigint totals.
   const gross = Number(row?.gross ?? 0);
