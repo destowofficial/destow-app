@@ -1,7 +1,7 @@
 // Integration tests for the auth/session security invariants. Requires a real
 // Postgres (db-test) and Redis - excluded from the default `bun test` by the
 // .itest.ts name; run via `bun run test:integration` (which wires the env).
-import { test, expect, afterAll, beforeAll } from 'bun:test';
+import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
 import { eq, sql } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
 import { db, pool } from '@/db/connection.js';
@@ -13,6 +13,7 @@ import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/servic
 import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
 import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
 import { getMe, updateMe } from '@/services/users/users.service.js';
+import { registerProvider, getMyProvider } from '@/services/providers/providers.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -21,7 +22,7 @@ beforeAll(async () => {
     throw new Error(`Refusing to truncate a non-test database: ${env.DATABASE_URL}`);
   }
   await db.execute(
-    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, service_providers, users RESTART IDENTITY CASCADE`,
   );
 
   // Redis holds rate-limit counters and the revocation denylist, and they
@@ -59,6 +60,15 @@ async function expectReject(p: Promise<unknown>, status: number) {
   expect(err).toBeInstanceOf(AppError);
   expect((err as AppError).status as number).toBe(status);
 }
+
+// platform_settings is global mutable state and the OTP-channel tests rewrite
+// it. Restore the default after every test, so test ordering never decides
+// whether a later test can send an OTP. With no row, getOtpSettings falls back
+// to the env-configured channels.
+afterEach(async () => {
+  await db.delete(platformSettings);
+  invalidateOtpSettings();
+});
 
 afterAll(async () => {
   await pool.end();
@@ -325,4 +335,77 @@ test('updateMe reports an email already in use as a conflict', async () => {
 
 test('updateMe on a missing user is a 404, not a silent success', async () => {
   await expectReject(updateMe('00000000-0000-0000-0000-000000000000', { name: 'X' }), 404);
+});
+
+// --- Providers module ---------------------------------------------------------
+// Becoming a provider is a role flip on the existing person, not a new account:
+// same users row, same phone, same login history.
+
+const AGENCY = { agencyName: 'Himalayan Cabs' };
+
+test('registering as a provider creates a pending profile and flips the role', async () => {
+  const user = await createUser();
+  const provider = await registerProvider(user.id, AGENCY, ctx);
+
+  expect(provider.agencyName).toBe('Himalayan Cabs');
+  // Existing is not the same as bookable - an admin still has to approve.
+  expect(provider.status).toBe('pending');
+  // No ratings yet reads as "unrated", not zero stars.
+  expect(provider.ratingAvg).toBeNull();
+
+  const [after] = await db.select().from(users).where(eq(users.id, user.id));
+  expect(after.role).toBe('provider');
+  expect(after.phone).toBe(user.phone); // same identity, not a new account
+});
+
+// Their live tokens still claim role=customer, and the audience on a session can
+// never change, so they must re-login into the partner app either way.
+test('registering revokes the caller existing sessions', async () => {
+  const user = await createUser();
+  const s = await createSession({ userId: user.id, role: user.role, client: 'customer_app', ctx });
+
+  await registerProvider(user.id, AGENCY, ctx);
+
+  const [sess] = await db.select().from(sessions).where(eq(sessions.id, s.sessionId));
+  expect(sess.revokedAt).not.toBeNull();
+  expect(sess.revokedReason).toBe('role_changed');
+  await expectReject(rotateRefresh(s.refreshToken, ctx), 401);
+});
+
+test('registering twice is a conflict, not a second profile', async () => {
+  const user = await createUser();
+  await registerProvider(user.id, AGENCY, ctx);
+  await expectReject(registerProvider(user.id, AGENCY, ctx), 409);
+});
+
+// One account approving listings and owning them is a conflict of interest.
+test('an admin cannot register as a provider', async () => {
+  const admin = await createUser('active', 'admin');
+  await expectReject(registerProvider(admin.id, AGENCY, ctx), 403);
+});
+
+test('getMyProvider returns the profile once registered, 404 before', async () => {
+  const user = await createUser();
+  await expectReject(getMyProvider(user.id), 404);
+  await registerProvider(user.id, AGENCY, ctx);
+  const mine = await getMyProvider(user.id);
+  expect(mine.agencyName).toBe('Himalayan Cabs');
+});
+
+// After the flip they belong to the partner app, and the customer app must
+// refuse them - the same client/role invariant, now exercised from the other side.
+test('a newly registered provider is refused by the customer app', async () => {
+  const user = await createUser();
+  await registerProvider(user.id, AGENCY, ctx);
+  const { code } = await issueOtp(user.phone);
+  await expectReject(verifyOtp(user.phone, code, 'customer_app', ctx), 403);
+});
+
+test('and is accepted by the partner app', async () => {
+  const user = await createUser();
+  await registerProvider(user.id, AGENCY, ctx);
+  const { code } = await issueOtp(user.phone);
+  const login = await verifyOtp(user.phone, code, 'provider_app', ctx);
+  expect(login.user.role).toBe('provider');
+  expect(decodeJwt(login.accessToken).aud).toBe('provider_app');
 });
