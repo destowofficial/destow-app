@@ -17,3 +17,17 @@ export function parseOrThrow<T extends z.ZodTypeAny>(schema: T, data: unknown): 
   }
   return result.data;
 }
+
+// Express 5 types a route param as string | string[]. Beyond narrowing it, this
+// rejects a malformed id here rather than letting Postgres reject it later:
+// `WHERE id = 'nope'` raises invalid-input-syntax, which surfaces as a 500 for
+// what is really a bad request.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function uuidParam(value: unknown, name = 'id'): string {
+  const v = Array.isArray(value) ? value[0] : value;
+  if (typeof v !== 'string' || !UUID_RE.test(v)) {
+    throw AppError.badRequest(`Invalid ${name}`);
+  }
+  return v;
+}
