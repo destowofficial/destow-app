@@ -11,6 +11,15 @@ import {
   createDriverController,
   updateDriverController,
 } from '../controllers/providers/fleet.controller.js';
+import {
+  listProviderBookingsController,
+  acceptBookingController,
+  rejectBookingController,
+  assignDriverController,
+  startTripController,
+  completeTripController,
+  earningsController,
+} from '../controllers/providers/fulfilment.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth/auth.js';
 
 export const providersRouter: express.Router = express.Router();
@@ -38,3 +47,16 @@ providersRouter.patch('/vehicles/:id', partnerOnly, updateVehicleController);
 providersRouter.get('/drivers', partnerOnly, listDriversController);
 providersRouter.post('/drivers', partnerOnly, createDriverController);
 providersRouter.patch('/drivers/:id', partnerOnly, updateDriverController);
+
+// --- Booking lifecycle --------------------------------------------------------
+// Every transition is gated by the state machine in lib/bookings/lifecycle, and
+// scoped to the caller's own provider by the query rather than by a check.
+providersRouter.get('/bookings', partnerOnly, listProviderBookingsController);
+providersRouter.post('/bookings/:id/accept', partnerOnly, acceptBookingController);
+providersRouter.post('/bookings/:id/reject', partnerOnly, rejectBookingController);
+providersRouter.post('/bookings/:id/assign', partnerOnly, assignDriverController);
+providersRouter.post('/bookings/:id/start', partnerOnly, startTripController);
+providersRouter.post('/bookings/:id/complete', partnerOnly, completeTripController);
+
+// Gross, commission deducted, and what is actually payable.
+providersRouter.get('/earnings', partnerOnly, earningsController);

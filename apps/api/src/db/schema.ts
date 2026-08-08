@@ -219,6 +219,12 @@ export const bookings = pgTable(
     paymentStatus: paymentStatusEnum('payment_status').notNull().default('pending'),
     paymentMethod: paymentMethodEnum('payment_method'),
     transactionRef: text('transaction_ref'),
+    // Commission accrues on completion, so this is the date the revenue belongs
+    // to. createdAt is when the trip was booked, which can be months earlier and
+    // is the wrong answer for a monthly statement.
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelledBy: text('cancelled_by'), // 'customer' | 'provider'
     ...timestamps,
   },
   (t) => [

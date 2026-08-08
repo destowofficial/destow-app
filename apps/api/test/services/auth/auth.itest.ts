@@ -30,7 +30,16 @@ import {
   createBooking,
   getMyBooking,
   listMyBookings,
+  cancelMyBooking,
 } from '@/services/bookings/bookings.service.js';
+import {
+  listProviderBookings,
+  acceptBooking,
+  assignDriver,
+  startTrip,
+  completeTrip,
+  getEarnings,
+} from '@/services/providers/fulfilment.service.js';
 import {
   listVehicles,
   createVehicle,
@@ -958,4 +967,142 @@ test('history paginates with a real total and a working status filter', async ()
   expect(completed.total).toBe(0);
   const pending = await listMyBookings(customer.id, { page: 1, limit: 20, status: 'pending' });
   expect(pending.total).toBe(3);
+});
+
+// --- Fulfilment: the trip actually runs, and commission accrues ---------------
+
+async function bookedTrip(pricePerKmPaise = 1300) {
+  const customer = await createUser();
+  const { owner, provider, vehicle } = await bookableVehicle(pricePerKmPaise);
+  const driver = await createDriver(owner.id, { name: 'Rajesh', phone: '9876500099' });
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+  });
+  return { customer, owner, provider, vehicle, driver, booking };
+}
+
+test('the full lifecycle runs and commission accrues only on completion', async () => {
+  const { owner, driver, booking } = await bookedTrip(1300);
+
+  // Nothing earned while the trip is merely booked.
+  expect((await getEarnings(owner.id)).completedTrips).toBe(0);
+  expect((await getEarnings(owner.id)).commissionPaise).toBe(0);
+
+  expect((await acceptBooking(owner.id, booking.id)).status).toBe('confirmed');
+  const assigned = await assignDriver(owner.id, booking.id, driver.id);
+  expect(assigned.status).toBe('assigned');
+  // Snapshotted so the customer's record survives the driver leaving.
+  expect(assigned.driverName).toBe('Rajesh');
+  expect(assigned.driverPhone).toBe('+919876500099');
+
+  expect((await startTrip(owner.id, booking.id)).status).toBe('ongoing');
+
+  // Still nothing earned - the trip is running but not finished.
+  expect((await getEarnings(owner.id)).completedTrips).toBe(0);
+
+  const done = await completeTrip(owner.id, booking.id);
+  expect(done.status).toBe('completed');
+  expect(done.completedAt).not.toBeNull();
+
+  const earnings = await getEarnings(owner.id);
+  expect(earnings.completedTrips).toBe(1);
+  expect(earnings.grossPaise).toBe(booking.totalFarePaise);
+  expect(earnings.commissionPaise + earnings.netPayoutPaise).toBe(earnings.grossPaise);
+  expect(earnings.commissionPaise).toBeGreaterThan(0);
+});
+
+// The invariant that protects the money: revenue cannot be booked for a trip
+// that never ran.
+test('a booking cannot skip straight to completed', async () => {
+  const { owner, booking } = await bookedTrip();
+  await expectReject(completeTrip(owner.id, booking.id), 409);
+  await acceptBooking(owner.id, booking.id);
+  await expectReject(completeTrip(owner.id, booking.id), 409); // still not started
+});
+
+test('completing twice does not accrue commission twice', async () => {
+  const { owner, driver, booking } = await bookedTrip(1000);
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id);
+
+  await expectReject(completeTrip(owner.id, booking.id), 409);
+
+  const earnings = await getEarnings(owner.id);
+  expect(earnings.completedTrips).toBe(1);
+  expect(earnings.grossPaise).toBe(booking.totalFarePaise);
+});
+
+test('a partner cannot act on another partner booking', async () => {
+  const { booking } = await bookedTrip();
+  const other = await createUser();
+  await registerProvider(other.id, AGENCY, ctx);
+  await expectReject(acceptBooking(other.id, booking.id), 404);
+  await expectReject(completeTrip(other.id, booking.id), 404);
+});
+
+// Assigning someone else's driver would hand their personal number to a
+// stranger's customer.
+test('a partner cannot assign another partner driver', async () => {
+  const { owner, booking } = await bookedTrip();
+  const rivalOwner = await createUser();
+  await registerProvider(rivalOwner.id, AGENCY, ctx);
+  const rivalDriver = await createDriver(rivalOwner.id, { name: 'Rival', phone: '9876500098' });
+
+  await acceptBooking(owner.id, booking.id);
+  await expectReject(assignDriver(owner.id, booking.id, rivalDriver.id), 404);
+});
+
+test('an inactive driver cannot be assigned', async () => {
+  const { owner, driver, booking } = await bookedTrip();
+  await updateDriver(owner.id, driver.id, { status: 'inactive' });
+  await acceptBooking(owner.id, booking.id);
+  await expectReject(assignDriver(owner.id, booking.id, driver.id), 409);
+});
+
+// An incoming request is still an offer - browsing the queue must not be a way
+// to harvest customer phone numbers.
+test('a customer phone is withheld until the partner accepts', async () => {
+  const { owner, booking } = await bookedTrip();
+  const pending = await listProviderBookings(owner.id, 'pending');
+  expect(pending.find((b) => b.id === booking.id)!.customerPhone).toBeNull();
+
+  await acceptBooking(owner.id, booking.id);
+  const confirmed = await listProviderBookings(owner.id, 'confirmed');
+  expect(confirmed.find((b) => b.id === booking.id)!.customerPhone).toMatch(/^\+91/);
+});
+
+// A partner sees their own economics in full; the customer never does.
+test('the partner queue shows commission, the customer view does not', async () => {
+  const { customer, owner, booking } = await bookedTrip();
+  const [row] = await listProviderBookings(owner.id);
+  expect(row.commissionPaise).toBeGreaterThan(0);
+  expect(row.providerPayoutPaise).toBeGreaterThan(0);
+
+  const customerView = await getMyBooking(customer.id, booking.id);
+  expect(customerView).not.toHaveProperty('commissionPaise');
+});
+
+test('a customer can cancel before the trip starts but not after', async () => {
+  const { customer, owner, driver, booking } = await bookedTrip();
+  const cancelled = await cancelMyBooking(customer.id, booking.id);
+  expect(cancelled.status).toBe('cancelled');
+  // Terminal - a second cancel is refused rather than silently repeated.
+  await expectReject(cancelMyBooking(customer.id, booking.id), 409);
+
+  const second = await bookedTrip();
+  await acceptBooking(second.owner.id, second.booking.id);
+  await assignDriver(second.owner.id, second.booking.id, second.driver.id);
+  await startTrip(second.owner.id, second.booking.id);
+  // The vehicle is on the road with them in it.
+  await expectReject(cancelMyBooking(second.customer.id, second.booking.id), 409);
+});
+
+test('a cancelled trip earns nothing', async () => {
+  const { customer, owner, booking } = await bookedTrip();
+  await cancelMyBooking(customer.id, booking.id);
+  const earnings = await getEarnings(owner.id);
+  expect(earnings.completedTrips).toBe(0);
+  expect(earnings.commissionPaise).toBe(0);
 });

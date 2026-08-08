@@ -14,6 +14,7 @@ import {
   platformSettings,
 } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
+import { assertTransition } from '../../lib/bookings/lifecycle.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
@@ -184,4 +185,32 @@ export async function listMyBookings(
     page: query.page,
     limit: query.limit,
   };
+}
+
+// A customer may call off a trip that has not started. Once it is ongoing the
+// vehicle is on the road with them in it, and that becomes a refund
+// conversation rather than a cancellation.
+export async function cancelMyBooking(
+  customerUserId: string,
+  bookingId: string,
+): Promise<CustomerBooking> {
+  const [existing] = await db
+    .select({ id: bookings.id, status: bookings.status })
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
+    .limit(1);
+  if (!existing) throw AppError.notFound('Booking not found');
+
+  assertTransition(existing.status, 'cancelled');
+
+  // Repeat the expected status in the WHERE clause so two taps of Cancel cannot
+  // both succeed - the second matches nothing rather than overwriting the first.
+  const [updated] = await db
+    .update(bookings)
+    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
+    .where(and(eq(bookings.id, bookingId), eq(bookings.status, existing.status)))
+    .returning({ id: bookings.id });
+  if (!updated) throw AppError.conflict('That booking changed while you were cancelling it');
+
+  return getMyBooking(customerUserId, bookingId);
 }
