@@ -228,6 +228,13 @@ export const bookings = pgTable(
     // keyed on the order, not the booking, so this is how one is found.
     paymentOrderId: text('payment_order_id'),
     paidAt: timestamp('paid_at', { withTimezone: true }),
+    // --- Refund snapshot, frozen like the fare ---------------------------------
+    // What was actually returned and retained, recorded at cancellation so a
+    // later policy change never rewrites a settled refund.
+    refundPaise: integer('refund_paise'),
+    cancellationFeePaise: integer('cancellation_fee_paise'),
+    refundedAt: timestamp('refunded_at', { withTimezone: true }),
+    refundRef: text('refund_ref'), // gateway refund id
     // Commission accrues on completion, so this is the date the revenue belongs
     // to. createdAt is when the trip was booked, which can be months earlier and
     // is the wrong answer for a monthly statement.
@@ -265,6 +272,11 @@ export const platformSettings = pgTable('platform_settings', {
   otpDefaultChannel: otpChannelEnum('otp_default_channel').notNull().default('log'),
   // Tried when the default errors at send time. Null = no fallback.
   otpFallbackChannel: otpChannelEnum('otp_fallback_channel'),
+  // --- Cancellation policy, admin-controlled ----------------------------------
+  // Cancel more than this many hours before pickup and the fare is refunded in
+  // full; inside it, this share is retained for the partner.
+  cancellationFreeHours: integer('cancellation_free_hours').notNull().default(24),
+  cancellationFeeBps: integer('cancellation_fee_bps').notNull().default(2500), // 25%
   updatedByUserId: uuid('updated_by_user_id').references(() => users.id),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
