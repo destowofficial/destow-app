@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { USER_ROLE, PROVIDER_STATUS } from './enums';
+import { USER_ROLE, PROVIDER_STATUS, VEHICLE_STATUS } from './enums';
 import { OTP_CHANNEL } from './auth';
 
 export const adminLoginBody = z.object({
@@ -17,6 +17,7 @@ export const adminVerifyBody = z.object({
 
 export const setUserRoleBody = z.object({ role: z.enum(USER_ROLE) });
 export const setProviderStatusBody = z.object({ status: z.enum(PROVIDER_STATUS) });
+export const setVehicleStatusBody = z.object({ status: z.enum(VEHICLE_STATUS) });
 export const setAdminPasswordBody = z.object({ password: z.string().min(12).max(128) });
 
 export const otpSettingsBody = z.object({

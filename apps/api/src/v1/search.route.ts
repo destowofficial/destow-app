@@ -2,6 +2,7 @@ import express from 'express';
 import {
   searchController,
   availableVehiclesController,
+  vehicleTypesController,
 } from '../controllers/search/search.controller.js';
 import { requireAuth } from '../middleware/auth/auth.js';
 import { rateLimit } from '../middleware/ratelimit/ratelimit.js';
@@ -20,3 +21,7 @@ searchRouter.use(requireAuth, quoteLimiter);
 
 searchRouter.post('/search', searchController);
 searchRouter.post('/vehicles/available', availableVehiclesController);
+
+// The catalog a partner lists against and a customer filters by. No maps call,
+// so it sits outside the quote limiter's purpose but harmlessly inside it.
+searchRouter.get('/vehicle-types', vehicleTypesController);

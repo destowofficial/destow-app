@@ -23,8 +23,16 @@ import {
   setProviderStatus,
   setAdminPassword,
   updateOtpSettings,
+  setVehicleStatus,
 } from '@/services/admin/admin.service.js';
 import { searchRoute, listAvailableVehicles } from '@/services/search/search.service.js';
+import {
+  listVehicles,
+  createVehicle,
+  updateVehicle,
+  createDriver,
+  updateDriver,
+} from '@/services/providers/fleet.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -687,4 +695,108 @@ test('results are cheapest first', async () => {
   const { vehicles: listed } = await listAvailableVehicles('Delhi', 'Agra');
   const fares = listed.map((v) => v.totalFarePaise);
   expect([...fares].sort((a, b) => a - b)).toEqual(fares);
+});
+
+// --- Provider fleet and roster ------------------------------------------------
+// No operation takes a provider id: it is resolved from the caller's token, so
+// another partner's row simply never matches.
+
+async function partnerWithType() {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  const [type] = await db
+    .insert(vehicleTypes)
+    .values({ category: 'car', name: `Type-${provider.id.slice(0, 8)}`, seats: 4, bags: 2 })
+    .returning();
+  return { owner, provider, type };
+}
+
+test('a new vehicle lands pending, never bookable on creation', async () => {
+  const { owner, type } = await partnerWithType();
+  const v = await createVehicle(owner.id, { vehicleTypeId: type.id, pricePerKmPaise: 1300 });
+  expect(v.status).toBe('pending');
+  expect(v.isActive).toBe(true);
+});
+
+test('an unknown vehicle type is refused rather than created on the fly', async () => {
+  const { owner } = await partnerWithType();
+  await expectReject(
+    createVehicle(owner.id, {
+      vehicleTypeId: '00000000-0000-0000-0000-000000000000',
+      pricePerKmPaise: 1300,
+    }),
+    422,
+  );
+});
+
+// The invariant the whole module rests on.
+test('a partner cannot read or modify another partner fleet', async () => {
+  const a = await partnerWithType();
+  const b = await partnerWithType();
+  const vehicleA = await createVehicle(a.owner.id, {
+    vehicleTypeId: a.type.id,
+    pricePerKmPaise: 1300,
+  });
+
+  // B cannot see A's vehicle...
+  const bList = await listVehicles(b.owner.id);
+  expect(bList.find((v) => v.id === vehicleA.id)).toBeUndefined();
+
+  // ...nor change its price, even knowing the id.
+  await expectReject(updateVehicle(b.owner.id, vehicleA.id, { pricePerKmPaise: 1 }), 404);
+
+  // And A's price is untouched.
+  const [still] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleA.id));
+  expect(still.pricePerKmPaise).toBe(1300);
+});
+
+test('a partner can update their own price and availability', async () => {
+  const { owner, type } = await partnerWithType();
+  const v = await createVehicle(owner.id, { vehicleTypeId: type.id, pricePerKmPaise: 1300 });
+  const updated = await updateVehicle(owner.id, v.id, { pricePerKmPaise: 1450, isActive: false });
+  expect(updated.pricePerKmPaise).toBe(1450);
+  expect(updated.isActive).toBe(false);
+  // A rate change does not send it back for approval - approval is about the
+  // vehicle being real, not about what it charges.
+  expect(updated.status).toBe(v.status);
+});
+
+test('a user with no provider profile cannot touch fleet endpoints', async () => {
+  const stranger = await createUser();
+  await expectReject(listVehicles(stranger.id), 404);
+});
+
+// Drivers get called by customers, so their number goes through the same
+// canonicalization as a login phone.
+test('a driver phone is canonicalized to E.164', async () => {
+  const { owner } = await partnerWithType();
+  const d = await createDriver(owner.id, { name: 'Rajesh Kumar', phone: '98765 43210' });
+  expect(d.phone).toBe('+919876543210');
+});
+
+test('a partner cannot modify another partner driver', async () => {
+  const a = await partnerWithType();
+  const b = await partnerWithType();
+  const driverA = await createDriver(a.owner.id, { name: 'A Driver', phone: '9876500011' });
+  await expectReject(updateDriver(b.owner.id, driverA.id, { name: 'Hijacked' }), 404);
+});
+
+// The end-to-end supply gate: nothing a partner lists is sellable until an admin
+// approves both the partner and the vehicle.
+test('a vehicle becomes bookable only after both approvals', async () => {
+  const { owner, provider, type } = await partnerWithType();
+  const v = await createVehicle(owner.id, { vehicleTypeId: type.id, pricePerKmPaise: 1200 });
+
+  const notYet = await listAvailableVehicles('Delhi', 'Agra');
+  expect(notYet.vehicles.find((x) => x.vehicleId === v.id)).toBeUndefined();
+
+  await setProviderStatus(provider.id, 'approved');
+  const stillNot = await listAvailableVehicles('Delhi', 'Agra');
+  expect(stillNot.vehicles.find((x) => x.vehicleId === v.id)).toBeUndefined();
+
+  await setVehicleStatus(v.id, 'approved');
+  const now = await listAvailableVehicles('Delhi', 'Agra');
+  const listed = now.vehicles.find((x) => x.vehicleId === v.id);
+  expect(listed).toBeDefined();
+  expect(listed!.totalFarePaise).toBe(Math.round((1200 * now.route.distanceM) / 1000));
 });

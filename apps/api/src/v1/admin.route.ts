@@ -6,6 +6,8 @@ import {
   setAdminPasswordController,
   listProvidersController,
   setProviderStatusController,
+  listVehiclesForReviewController,
+  setVehicleStatusController,
   updateOtpSettingsController,
 } from '../controllers/admin/admin.controller.js';
 import { requireAuth, requireRole, requireClient } from '../middleware/auth/auth.js';
@@ -32,4 +34,6 @@ adminRouter.patch('/users/:id/role', setUserRoleController);
 adminRouter.put('/users/:id/password', setAdminPasswordController);
 adminRouter.get('/providers', listProvidersController);
 adminRouter.patch('/providers/:id/status', setProviderStatusController);
+adminRouter.get('/vehicles', listVehiclesForReviewController);
+adminRouter.patch('/vehicles/:id/status', setVehicleStatusController);
 adminRouter.put('/settings/otp', updateOtpSettingsController);
