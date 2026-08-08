@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, count, eq } from 'drizzle-orm';
 import type { AvailableVehicle, RouteQuote, VehicleCategory } from '@destow/contracts';
 import { db } from '../../db/connection.js';
 import { vehicles, vehicleTypes, serviceProviders, platformSettings } from '../../db/schema.js';
@@ -22,11 +22,22 @@ async function platformCommissionBps(): Promise<number> {
   return clampCommissionBps(row?.bps ?? 1800);
 }
 
+// A customer choosing a car does not scroll past a few dozen, but pricing every
+// vehicle in the catalogue costs a fare computation each and grows without
+// bound as partners onboard. Cap the work, and report the true total so a
+// truncated list is visible rather than silently passed off as everything.
+const MAX_LISTED_VEHICLES = 50;
+
 export async function listAvailableVehicles(
   from: string,
   to: string,
   category?: VehicleCategory,
-): Promise<{ route: RouteQuote; vehicles: AvailableVehicle[] }> {
+): Promise<{
+  route: RouteQuote;
+  vehicles: AvailableVehicle[];
+  totalAvailable: number;
+  truncated: boolean;
+}> {
   const route = await searchRoute(from, to);
   const defaultBps = await platformCommissionBps();
 
@@ -34,6 +45,22 @@ export async function listAvailableVehicles(
   // approved, the vehicle is approved, and the vehicle is currently active. A
   // pending provider's fleet must never appear, which is what makes admin
   // approval mean something.
+  const where = and(
+    eq(serviceProviders.status, 'approved'),
+    eq(vehicles.status, 'approved'),
+    eq(vehicles.isActive, true),
+    category ? eq(vehicleTypes.category, category) : undefined,
+  );
+
+  // Counted separately so the cap never misreports how much is actually on
+  // offer; counting is cheap, pricing is not.
+  const [{ totalAvailable }] = await db
+    .select({ totalAvailable: count() })
+    .from(vehicles)
+    .innerJoin(vehicleTypes, eq(vehicleTypes.id, vehicles.vehicleTypeId))
+    .innerJoin(serviceProviders, eq(serviceProviders.id, vehicles.serviceProviderId))
+    .where(where);
+
   const rows = await db
     .select({
       vehicle: vehicles,
@@ -43,14 +70,10 @@ export async function listAvailableVehicles(
     .from(vehicles)
     .innerJoin(vehicleTypes, eq(vehicleTypes.id, vehicles.vehicleTypeId))
     .innerJoin(serviceProviders, eq(serviceProviders.id, vehicles.serviceProviderId))
-    .where(
-      and(
-        eq(serviceProviders.status, 'approved'),
-        eq(vehicles.status, 'approved'),
-        eq(vehicles.isActive, true),
-        category ? eq(vehicleTypes.category, category) : undefined,
-      ),
-    );
+    .where(where)
+    // Cheapest first is also the useful set to keep when capping.
+    .orderBy(vehicles.pricePerKmPaise)
+    .limit(MAX_LISTED_VEHICLES);
 
   const priced = rows.map(({ vehicle, type, provider }): AvailableVehicle => {
     // Same engine the booking will use, with the same inputs, so the quoted
@@ -86,7 +109,12 @@ export async function listAvailableVehicles(
   // Cheapest first - the transparent per-km price is the product's whole pitch.
   priced.sort((a, b) => a.totalFarePaise - b.totalFarePaise);
 
-  return { route, vehicles: priced };
+  return {
+    route,
+    vehicles: priced,
+    totalAvailable,
+    truncated: totalAvailable > priced.length,
+  };
 }
 
 // The admin-managed catalog a partner picks from when listing a vehicle, and a

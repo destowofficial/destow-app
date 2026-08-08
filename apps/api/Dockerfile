@@ -30,5 +30,10 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
+# Drop root. A compromise in the API should not own the container filesystem,
+# and nothing here needs to write outside the app directory. The oven/bun image
+# ships a non-root `bun` user; the source is owned by root and only read.
+USER bun
+
 # Migrate + seed, then start the server.
 CMD ["sh", "-c", "bun run db:migrate && bun run db:seed && bun src/index.ts"]

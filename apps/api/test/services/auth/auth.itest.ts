@@ -1084,18 +1084,18 @@ test('an inactive driver cannot be assigned', async () => {
 // to harvest customer phone numbers.
 test('a customer phone is withheld until the partner accepts', async () => {
   const { owner, booking } = await bookedTrip();
-  const pending = await listProviderBookings(owner.id, 'pending');
+  const { items: pending } = await listProviderBookings(owner.id, 'pending');
   expect(pending.find((b) => b.id === booking.id)!.customerPhone).toBeNull();
 
   await acceptBooking(owner.id, booking.id);
-  const confirmed = await listProviderBookings(owner.id, 'confirmed');
+  const { items: confirmed } = await listProviderBookings(owner.id, 'confirmed');
   expect(confirmed.find((b) => b.id === booking.id)!.customerPhone).toMatch(/^\+91/);
 });
 
 // A partner sees their own economics in full; the customer never does.
 test('the partner queue shows commission, the customer view does not', async () => {
   const { customer, owner, booking } = await bookedTrip();
-  const [row] = await listProviderBookings(owner.id);
+  const { items: [row] } = await listProviderBookings(owner.id);
   expect(row.commissionPaise).toBeGreaterThan(0);
   expect(row.providerPayoutPaise).toBeGreaterThan(0);
 
@@ -1740,4 +1740,99 @@ test('earnings exclude completed trips that were never paid', async () => {
   const after = await getEarnings(owner.id);
   expect(after.completedTrips).toBe(1);
   expect(after.grossPaise).toBe(booking.totalFarePaise);
+});
+
+// --- Hardening: hold expiry, bounded listings (#37, #39, #40) -----------------
+
+// Booking every car and never paying would otherwise take a partner's whole
+// fleet off the market for free - a pending booking is a live reservation.
+test('an abandoned unpaid hold is released when someone else wants the vehicle', async () => {
+  const squatter = await createUser();
+  const buyer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = new Date(Date.now() + 1200 * 3600 * 1000);
+
+  const held = await createBooking(squatter.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  // Still fresh, so it genuinely blocks.
+  await expectReject(
+    createBooking(buyer.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    }),
+    409,
+  );
+
+  // Age it past the hold window.
+  await db
+    .update(bookings)
+    .set({ createdAt: new Date(Date.now() - 60 * 60_000) })
+    .where(eq(bookings.id, held.id));
+
+  const won = await createBooking(buyer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  expect(won.status).toBe('pending');
+
+  const [expired] = await db.select().from(bookings).where(eq(bookings.id, held.id));
+  expect(expired.status).toBe('cancelled');
+  expect(expired.cancelledBy).toBe('system');
+});
+
+// A paid booking is not abandoned, however old - only unpaid holds expire.
+test('a paid booking is never released by hold expiry', async () => {
+  const customer = await createUser();
+  const other = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = new Date(Date.now() + 1400 * 3600 * 1000);
+
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+  });
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = `pay_hold_${booking.id.slice(0, 6)}`;
+  await confirmPayment(customer.id, booking.id, {
+    orderId, paymentId, signature: stubSignature(orderId, paymentId),
+  });
+
+  // Older than the hold window, but paid - so it must still hold the vehicle.
+  await db
+    .update(bookings)
+    .set({ createdAt: new Date(Date.now() - 24 * 3600 * 1000) })
+    .where(eq(bookings.id, booking.id));
+
+  await expectReject(
+    createBooking(other.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    }),
+    409,
+  );
+
+  const [still] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
+  expect(still.status).toBe('pending');
+});
+
+test('the vehicle listing reports the true total even when capped', async () => {
+  await bookableVehicle(1000);
+  const listing = await listAvailableVehicles('Delhi', 'Agra');
+  expect(listing.vehicles.length).toBeLessThanOrEqual(50);
+  expect(listing.totalAvailable).toBeGreaterThanOrEqual(listing.vehicles.length);
+  expect(listing.truncated).toBe(listing.totalAvailable > listing.vehicles.length);
+});
+
+// This response joins customer names and phone numbers, so unbounded would hand
+// a partner their whole customer list in one request.
+test('the provider booking list is paginated', async () => {
+  const { owner, booking } = await bookedTrip();
+  const page = await listProviderBookings(owner.id, undefined, 1, 1);
+  expect(page.items.length).toBeLessThanOrEqual(1);
+  expect(page.limit).toBe(1);
+  expect(page.total).toBeGreaterThanOrEqual(1);
+  expect(page.items.some((b) => b.id === booking.id) || page.total > 1).toBe(true);
+});
+
+test('an oversized page size is clamped rather than honoured', async () => {
+  const { owner } = await bookedTrip();
+  const page = await listProviderBookings(owner.id, undefined, 1, 9999);
+  expect(page.limit).toBeLessThanOrEqual(50);
 });

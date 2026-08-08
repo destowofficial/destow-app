@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, lt } from 'drizzle-orm';
 import type {
   CreateBookingBody,
   CustomerBooking,
@@ -87,6 +87,29 @@ function joinedBookings() {
     .innerJoin(serviceProviders, eq(serviceProviders.id, bookings.serviceProviderId));
 }
 
+// How long an unpaid booking may hold a vehicle. Without this, booking every
+// car and never paying takes a partner's whole fleet off the market for free -
+// the exclusion constraint counts a 'pending' booking as a live reservation.
+const HOLD_MINUTES = 30;
+
+// Released lazily, at the only moment it matters: when someone else wants this
+// vehicle. A sweeper job would also work, but this needs no scheduler and
+// cannot drift - contention is exactly when the check has to be correct.
+async function releaseExpiredHolds(vehicleId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - HOLD_MINUTES * 60_000);
+  await db
+    .update(bookings)
+    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'system' })
+    .where(
+      and(
+        eq(bookings.vehicleId, vehicleId),
+        eq(bookings.status, 'pending'),
+        eq(bookings.paymentStatus, 'pending'),
+        lt(bookings.createdAt, cutoff),
+      ),
+    );
+}
+
 export async function createBooking(
   customerUserId: string,
   body: CreateBookingBody,
@@ -112,6 +135,10 @@ export async function createBooking(
   ) {
     throw AppError.conflict('That vehicle is no longer available to book');
   }
+
+  // Free any abandoned holds on this vehicle before competing for it, so an
+  // unpaid booking from an hour ago cannot block a paying customer.
+  await releaseExpiredHolds(found.vehicle.id);
 
   const distance = await resolveDistance(body.from, body.to);
 

@@ -19,8 +19,8 @@ function callerId(req: Request): string {
 }
 
 export async function listProviderBookingsController(req: Request, res: Response) {
-  const { status } = parseOrThrow(providerBookingsQuery, req.query);
-  ok(res, { bookings: await listProviderBookings(callerId(req), status) });
+  const { status, page, limit } = parseOrThrow(providerBookingsQuery, req.query);
+  ok(res, await listProviderBookings(callerId(req), status, page, limit));
 }
 
 export async function acceptBookingController(req: Request, res: Response) {
