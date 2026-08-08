@@ -28,9 +28,18 @@ export interface PaymentSignature {
   signature: string;
 }
 
+export interface RefundResult {
+  refundId: string;
+  amountPaise: number;
+}
+
 export interface PaymentProvider {
   readonly name: string;
   createOrder(input: { bookingId: string; amountPaise: number }): Promise<PaymentOrder>;
+  // Partial refunds are the norm here, not the exception: a late cancellation
+  // returns the fare minus the fee retained for the partner, so the amount is
+  // always explicit rather than implied to be the whole payment.
+  refund(input: { paymentId: string; amountPaise: number }): Promise<RefundResult>;
   // Whether this really came from the gateway. The whole integrity of the
   // payment flow is this one boolean: without it a client could simply claim it
   // paid, which is the money equivalent of sending your own fare.
@@ -73,6 +82,17 @@ class RazorpayProvider implements PaymentProvider {
     );
   }
 
+  async refund(_input: { paymentId: string; amountPaise: number }): Promise<RefundResult> {
+    return observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'razorpay', operation: 'refund' },
+      async () => {
+        throw new Error('RazorpayProvider.refund not implemented - POST /v1/payments/:id/refund');
+      },
+    );
+  }
+
   // Razorpay signs "<order_id>|<payment_id>" with the key secret.
   verifyPayment({ orderId, paymentId, signature }: PaymentSignature): boolean {
     const expected = hmacHex(env.RAZORPAY_KEY_SECRET ?? '', `${orderId}|${paymentId}`);
@@ -108,6 +128,17 @@ class StubPaymentProvider implements PaymentProvider {
     );
     recordPaymentEvent('stub', 'upi', 'created');
     return order;
+  }
+
+  async refund(input: { paymentId: string; amountPaise: number }): Promise<RefundResult> {
+    const result = await observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'stub', operation: 'refund' },
+      async () => ({ refundId: `rfnd_stub_${input.paymentId}`, amountPaise: input.amountPaise }),
+    );
+    recordPaymentEvent('stub', 'upi', 'refunded');
+    return result;
   }
 
   verifyPayment({ orderId, paymentId, signature }: PaymentSignature): boolean {

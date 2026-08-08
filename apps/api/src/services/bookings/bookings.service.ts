@@ -8,13 +8,16 @@ import type {
 import { db } from '../../db/connection.js';
 import {
   bookings,
+  platformSettings,
   vehicles,
   vehicleTypes,
   serviceProviders,
-  platformSettings,
 } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
 import { assertTransition } from '../../lib/bookings/lifecycle.js';
+import { computeRefund } from '../../lib/pricing/refund.js';
+import { payments } from '../../lib/adapters/payments.js';
+import { safeError } from '../../lib/log/safe.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
@@ -227,7 +230,7 @@ export async function cancelMyBooking(
   bookingId: string,
 ): Promise<CustomerBooking> {
   const [existing] = await db
-    .select({ id: bookings.id, status: bookings.status })
+    .select()
     .from(bookings)
     .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
     .limit(1);
@@ -235,8 +238,10 @@ export async function cancelMyBooking(
 
   assertTransition(existing.status, 'cancelled');
 
-  // Repeat the expected status in the WHERE clause so two taps of Cancel cannot
-  // both succeed - the second matches nothing rather than overwriting the first.
+  // Claim the cancellation FIRST, and only then move money. Repeating the
+  // expected status in the WHERE clause means two taps of Cancel cannot both
+  // win, so the refund below runs exactly once - refunding before claiming
+  // would let a double tap issue two refunds.
   const [updated] = await db
     .update(bookings)
     .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
@@ -244,5 +249,59 @@ export async function cancelMyBooking(
     .returning({ id: bookings.id });
   if (!updated) throw AppError.conflict('That booking changed while you were cancelling it');
 
+  if (existing.paymentStatus === 'paid') {
+    await refundCancelledBooking(existing);
+  }
+
   return getMyBooking(customerUserId, bookingId);
+}
+
+// Return the fare, minus whatever the policy retains for the partner. Called
+// only after the cancellation has been claimed, so it runs once per booking.
+async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Promise<void> {
+  const [settings] = await db
+    .select({
+      freeHours: platformSettings.cancellationFreeHours,
+      feeBps: platformSettings.cancellationFeeBps,
+    })
+    .from(platformSettings)
+    .limit(1);
+
+  const breakdown = computeRefund({
+    totalFarePaise: booking.totalFarePaise,
+    pickupAt: booking.pickupDatetime,
+    cancelledAt: new Date(),
+    policy: { freeHours: settings?.freeHours ?? 24, feeBps: settings?.feeBps ?? 2500 },
+  });
+
+  // Record the outcome even when nothing is returned, so a late cancellation
+  // shows why the customer got nothing back rather than looking like a bug.
+  const record = {
+    refundPaise: breakdown.refundPaise,
+    cancellationFeePaise: breakdown.cancellationFeePaise,
+    refundedAt: new Date(),
+  };
+
+  if (breakdown.refundPaise === 0) {
+    await db.update(bookings).set(record).where(eq(bookings.id, booking.id));
+    return;
+  }
+
+  try {
+    const refund = await payments.refund({
+      paymentId: booking.transactionRef ?? '',
+      amountPaise: breakdown.refundPaise,
+    });
+    await db
+      .update(bookings)
+      .set({ ...record, paymentStatus: 'refunded', refundRef: refund.refundId })
+      .where(eq(bookings.id, booking.id));
+  } catch (err) {
+    // The trip is already cancelled and must stay cancelled - a gateway outage
+    // is not a reason to put a customer back on a trip they called off. Leave
+    // payment_status as 'paid' so the booking is visibly owed a refund and can
+    // be retried or settled by hand, rather than silently marked refunded.
+    console.error(`[payments] refund failed for booking ${booking.id}: ${safeError(err)}`);
+    await db.update(bookings).set(record).where(eq(bookings.id, booking.id));
+  }
 }

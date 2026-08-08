@@ -64,6 +64,13 @@
       "when": 1786208162583,
       "tag": "0008_robust_morlocks",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786209310878,
+      "tag": "0009_dusty_red_hulk",
+      "breakpoints": true
     }
   ]
 }
