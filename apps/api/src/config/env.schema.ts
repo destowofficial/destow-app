@@ -83,6 +83,13 @@ export const envSchema = z.object({
   TELEGRAM_GATEWAY_TOKEN: z.string().optional(),
   TELEGRAM_SENDER_USERNAME: z.string().optional(),
 
+  // --- Admin bootstrap --------------------------------------------------------
+  // All three together create the first admin, once, if no admin exists. Leave
+  // unset after the first deploy - the seed is a no-op when an admin is present.
+  ADMIN_PHONE: z.string().optional(),
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_INITIAL_PASSWORD: z.string().optional(),
+
   // Optional integrations - validated only when present.
   MAPS_API_KEY: z.string().optional(),
   RAZORPAY_KEY_ID: z.string().optional(),

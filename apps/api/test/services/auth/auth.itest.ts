@@ -2,18 +2,25 @@
 // Postgres (db-test) and Redis - excluded from the default `bun test` by the
 // .itest.ts name; run via `bun run test:integration` (which wires the env).
 import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and, notInArray } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
-import { users, sessions, refreshTokens, platformSettings, customers } from '@/db/schema.js';
+import { users, sessions, refreshTokens, platformSettings, customers, admins } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
 import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js';
 import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
 import { getMe, updateMe } from '@/services/users/users.service.js';
 import { registerProvider, getMyProvider } from '@/services/providers/providers.service.js';
+import { adminPasswordStep, adminOtpStep } from '@/services/admin/admin-auth.service.js';
+import {
+  setUserRole,
+  setProviderStatus,
+  setAdminPassword,
+  updateOtpSettings,
+} from '@/services/admin/admin.service.js';
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -22,7 +29,7 @@ beforeAll(async () => {
     throw new Error(`Refusing to truncate a non-test database: ${env.DATABASE_URL}`);
   }
   await db.execute(
-    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, service_providers, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE auth_events, refresh_tokens, sessions, otps, customers, admins, service_providers, users RESTART IDENTITY CASCADE`,
   );
 
   // Redis holds rate-limit counters and the revocation denylist, and they
@@ -408,4 +415,151 @@ test('and is accepted by the partner app', async () => {
   const login = await verifyOtp(user.phone, code, 'provider_app', ctx);
   expect(login.user.role).toBe('provider');
   expect(decodeJwt(login.accessToken).aud).toBe('provider_app');
+});
+
+// --- Admin module: two-factor sign-in -----------------------------------------
+// Password AND phone OTP. Either alone mints nothing.
+
+const ADMIN_PW = 'correct horse battery staple';
+
+async function makeAdmin(email: string) {
+  const user = await createUser('active', 'admin');
+  await db.update(users).set({ email }).where(eq(users.id, user.id));
+  await setAdminPassword(user.id, ADMIN_PW);
+  return { ...user, email };
+}
+
+// adminPasswordStep sends an OTP we cannot read (it is stored hashed). issueOtp
+// replaces any live code for that phone and returns the plaintext, so the test
+// can complete the second factor without production code leaking anything.
+async function freshCodeFor(phone: string) {
+  const { code } = await issueOtp(phone);
+  return code;
+}
+
+test('the password step alone mints no session, only a challenge', async () => {
+  const admin = await makeAdmin('a1@destow.in');
+  const challenge = await adminPasswordStep(admin.email, ADMIN_PW, ctx);
+  expect(challenge.challengeToken.length).toBeGreaterThan(20);
+  expect(challenge.phoneHint).toMatch(/^••••\d{4}$/);
+  // Nothing that looks like a session came back.
+  expect(challenge).not.toHaveProperty('accessToken');
+  const rows = await db.select().from(sessions).where(eq(sessions.userId, admin.id));
+  expect(rows).toHaveLength(0);
+});
+
+test('both factors together mint an admin_web session', async () => {
+  const admin = await makeAdmin('a2@destow.in');
+  const challenge = await adminPasswordStep(admin.email, ADMIN_PW, ctx);
+  const code = await freshCodeFor(admin.phone);
+  const result = await adminOtpStep(challenge.challengeToken, code, ctx);
+  expect(result.user.role).toBe('admin');
+  expect(decodeJwt(result.accessToken).aud).toBe('admin_web');
+});
+
+test('a wrong password is rejected and indistinguishable from an unknown email', async () => {
+  const admin = await makeAdmin('a3@destow.in');
+  await expectReject(adminPasswordStep(admin.email, 'wrong password here', ctx), 401);
+  await expectReject(adminPasswordStep('nobody@destow.in', 'wrong password here', ctx), 401);
+});
+
+// A non-admin with a password must not get in through the admin door.
+test('a customer with credentials still cannot use the admin login', async () => {
+  const user = await createUser();
+  await db.update(users).set({ email: 'cust@destow.in' }).where(eq(users.id, user.id));
+  await setAdminPassword(user.id, ADMIN_PW);
+  await expectReject(adminPasswordStep('cust@destow.in', ADMIN_PW, ctx), 401);
+});
+
+// A typo on the code must not force the whole password step again.
+test('a wrong code does not burn the challenge', async () => {
+  const admin = await makeAdmin('a4@destow.in');
+  const challenge = await adminPasswordStep(admin.email, ADMIN_PW, ctx);
+  await expectReject(adminOtpStep(challenge.challengeToken, '000000', ctx), 401);
+  // Same challenge still usable with the right code.
+  const result = await adminOtpStep(challenge.challengeToken, await freshCodeFor(admin.phone), ctx);
+  expect(result.user.role).toBe('admin');
+});
+
+test('the password step locks the account after repeated failures', async () => {
+  const admin = await makeAdmin('a5@destow.in');
+  for (let i = 0; i < 5; i++) {
+    await expectReject(adminPasswordStep(admin.email, 'nope nope nope', ctx), 401);
+  }
+  // Now locked - even the correct password is refused.
+  await expectReject(adminPasswordStep(admin.email, ADMIN_PW, ctx), 429);
+});
+
+// --- Admin module: control plane ----------------------------------------------
+
+test('an admin cannot change their own role', async () => {
+  const admin = await makeAdmin('a6@destow.in');
+  await expectReject(setUserRole(admin.id, admin.id, 'customer', ctx), 403);
+});
+
+test('the last admin cannot be demoted', async () => {
+  const keeper = await makeAdmin('a7@destow.in');
+  const actor = await makeAdmin('a8@destow.in');
+  // Earlier tests in this file leave admins behind, so state the premise
+  // explicitly rather than assuming a clean slate: demote everyone but these two.
+  await db
+    .update(users)
+    .set({ role: 'customer' })
+    .where(and(eq(users.role, 'admin'), notInArray(users.id, [keeper.id, actor.id])));
+
+  // Two admins, so demoting one is allowed.
+  await setUserRole(actor.id, keeper.id, 'customer', ctx);
+  // `actor` is now the only admin left, so this must be refused.
+  await expectReject(setUserRole(keeper.id, actor.id, 'customer', ctx), 409);
+});
+
+// Promoting someone with no password would create an account that can never
+// sign in: the console needs both factors and the OTP path refuses admins.
+test('promoting to admin without credentials is refused', async () => {
+  const admin = await makeAdmin('a10@destow.in');
+  const target = await createUser();
+  await expectReject(setUserRole(admin.id, target.id, 'admin', ctx), 422);
+  await setAdminPassword(target.id, ADMIN_PW);
+  const res = await setUserRole(admin.id, target.id, 'admin', ctx);
+  expect(res.role).toBe('admin');
+});
+
+test('a role change revokes the target sessions immediately', async () => {
+  const admin = await makeAdmin('a11@destow.in');
+  const target = await createUser();
+  const s = await createSession({ userId: target.id, role: 'customer', client: 'customer_app', ctx });
+  await setUserRole(admin.id, target.id, 'provider', ctx);
+  const [sess] = await db.select().from(sessions).where(eq(sessions.id, s.sessionId));
+  expect(sess.revokedReason).toBe('role_changed');
+});
+
+test('approving a provider flips it from pending', async () => {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  expect(provider.status).toBe('pending');
+  const updated = await setProviderStatus(provider.id, 'approved');
+  expect(updated.status).toBe('approved');
+});
+
+// The write side of the admin-selectable OTP channel: a channel with no
+// credentials is refused up front, not silently dropped at delivery time.
+test('OTP settings refuse a channel with no credentials configured', async () => {
+  await expectReject(
+    updateOtpSettings({ channels: ['whatsapp'], defaultChannel: 'whatsapp' }),
+    422,
+  );
+});
+
+test('OTP settings accept an available channel and take effect immediately', async () => {
+  await updateOtpSettings({ channels: ['log'], defaultChannel: 'log' });
+  const settings = await getOtpSettings();
+  expect(settings.channels).toEqual(['log']);
+  expect(settings.defaultChannel).toBe('log');
+});
+
+test('OTP settings refuse a default that is not among the enabled channels', async () => {
+  await expectReject(
+    updateOtpSettings({ channels: ['log'], defaultChannel: 'whatsapp' }),
+    422,
+  );
 });
