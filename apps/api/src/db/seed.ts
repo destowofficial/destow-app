@@ -1,12 +1,16 @@
 import { pathToFileURL } from 'node:url';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
+import { ensureAdminBootstrap } from '../services/admin/admin-bootstrap.service.js';
 import { users, serviceProviders, vehicles, vehicleTypes, platformSettings } from './schema.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
 // Idempotent baseline data for local/dev: platform commission + the vehicle-type catalog.
 export async function seedDatabase(db: Db): Promise<void> {
+  // First admin, if ADMIN_* are set and none exists yet. Idempotent.
+  await ensureAdminBootstrap();
+
   const settings = await db.select({ id: platformSettings.id }).from(platformSettings).limit(1);
   if (settings.length === 0) {
     await db.insert(platformSettings).values({ commissionBps: 1800 }); // 18%
