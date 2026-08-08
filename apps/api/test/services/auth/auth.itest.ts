@@ -9,7 +9,7 @@ import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes,
+  vehicles, vehicleTypes, bookings,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -26,6 +26,11 @@ import {
   setVehicleStatus,
 } from '@/services/admin/admin.service.js';
 import { searchRoute, listAvailableVehicles } from '@/services/search/search.service.js';
+import {
+  createBooking,
+  getMyBooking,
+  listMyBookings,
+} from '@/services/bookings/bookings.service.js';
 import {
   listVehicles,
   createVehicle,
@@ -799,4 +804,158 @@ test('a vehicle becomes bookable only after both approvals', async () => {
   const listed = now.vehicles.find((x) => x.vehicleId === v.id);
   expect(listed).toBeDefined();
   expect(listed!.totalFarePaise).toBe(Math.round((1200 * now.route.distanceM) / 1000));
+});
+
+// --- Bookings -----------------------------------------------------------------
+// Where a quote becomes a commitment. The fare is computed here and frozen: a
+// later rate or commission change must never alter an agreed booking.
+
+const TOMORROW = () => new Date(Date.now() + 24 * 3600 * 1000);
+
+async function bookableVehicle(pricePerKmPaise: number) {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  await setProviderStatus(provider.id, 'approved');
+  const [type] = await db
+    .insert(vehicleTypes)
+    .values({ category: 'car', name: `B-${pricePerKmPaise}`, seats: 4, bags: 2 })
+    .returning();
+  const [vehicle] = await db
+    .insert(vehicles)
+    .values({
+      serviceProviderId: provider.id,
+      vehicleTypeId: type.id,
+      pricePerKmPaise,
+      status: 'approved',
+      isActive: true,
+    })
+    .returning();
+  return { owner, provider, type, vehicle };
+}
+
+test('a booking freezes the fare the server computed', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1300);
+  const route = await searchRoute('Delhi', 'Agra');
+
+  const b = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: TOMORROW(),
+    tripType: 'one_way',
+  });
+
+  expect(b.status).toBe('pending');
+  expect(b.paymentStatus).toBe('pending');
+  expect(b.distanceM).toBe(route.distanceM);
+  expect(b.pricePerKmPaise).toBe(1300);
+  expect(b.totalFarePaise).toBe(Math.round((1300 * route.distanceM) / 1000));
+
+  // The commission side is stored but never shown to the customer.
+  const [row] = await db.select().from(bookings).where(eq(bookings.id, b.id));
+  expect(row.commissionPaise + row.providerPayoutPaise).toBe(row.totalFarePaise);
+  expect(row.commissionBps).toBeGreaterThanOrEqual(1500);
+  expect(row.commissionBps).toBeLessThanOrEqual(2000);
+});
+
+// The reason the snapshot exists.
+test('changing the vehicle price later does not alter an existing booking', async () => {
+  const customer = await createUser();
+  const { owner, vehicle } = await bookableVehicle(1000);
+  const b = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: TOMORROW(),
+    tripType: 'one_way',
+  });
+  const agreed = b.totalFarePaise;
+
+  await updateVehicle(owner.id, vehicle.id, { pricePerKmPaise: 9000 });
+
+  const after = await getMyBooking(customer.id, b.id);
+  expect(after.totalFarePaise).toBe(agreed);
+  expect(after.pricePerKmPaise).toBe(1000);
+});
+
+test('a customer never sees commission on their own booking', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1200);
+  const b = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+  });
+  for (const field of ['commissionPaise', 'providerPayoutPaise', 'commissionBps']) {
+    expect(b).not.toHaveProperty(field);
+  }
+  const fetched = await getMyBooking(customer.id, b.id);
+  expect(fetched).not.toHaveProperty('commissionPaise');
+});
+
+// The listing is a moment in time; this is the moment that counts.
+test('a vehicle deactivated after the quote cannot be booked', async () => {
+  const customer = await createUser();
+  const { owner, vehicle } = await bookableVehicle(1100);
+  await updateVehicle(owner.id, vehicle.id, { isActive: false });
+  await expectReject(
+    createBooking(customer.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    }),
+    409,
+  );
+});
+
+test('a pending provider vehicle cannot be booked', async () => {
+  const customer = await createUser();
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx); // pending
+  const [type] = await db
+    .insert(vehicleTypes).values({ category: 'car', name: 'PendBook', seats: 4, bags: 2 }).returning();
+  const [v] = await db
+    .insert(vehicles)
+    .values({ serviceProviderId: provider.id, vehicleTypeId: type.id, pricePerKmPaise: 1000, status: 'approved', isActive: true })
+    .returning();
+  await expectReject(
+    createBooking(customer.id, {
+      vehicleId: v.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    }),
+    409,
+  );
+});
+
+test('a customer cannot read another customer booking', async () => {
+  const alice = await createUser();
+  const bob = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const b = await createBooking(alice.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+  });
+  await expectReject(getMyBooking(bob.id, b.id), 404);
+});
+
+// The old backend returned the current page's row count as `count`, so a client
+// could never render "page 2 of 5".
+test('history paginates with a real total and a working status filter', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  for (let i = 0; i < 3; i++) {
+    await createBooking(customer.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    });
+  }
+
+  const page1 = await listMyBookings(customer.id, { page: 1, limit: 2 });
+  expect(page1.items).toHaveLength(2);
+  expect(page1.total).toBe(3); // total, not page length
+  expect(page1.page).toBe(1);
+
+  const page2 = await listMyBookings(customer.id, { page: 2, limit: 2 });
+  expect(page2.items).toHaveLength(1);
+  expect(page2.total).toBe(3);
+
+  // The status filter is actually applied - it was silently ignored before.
+  const completed = await listMyBookings(customer.id, { page: 1, limit: 20, status: 'completed' });
+  expect(completed.total).toBe(0);
+  const pending = await listMyBookings(customer.id, { page: 1, limit: 20, status: 'pending' });
+  expect(pending.total).toBe(3);
 });

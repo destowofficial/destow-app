@@ -11,3 +11,4 @@ export * from './providers';
 export * from './admin';
 export * from './search';
 export * from './fleet';
+export * from './bookings';
