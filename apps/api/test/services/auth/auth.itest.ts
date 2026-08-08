@@ -9,7 +9,7 @@ import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes, bookings,
+  vehicles, vehicleTypes, bookings, serviceProviders,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -17,6 +17,7 @@ import { requestOtp, verifyOtp, issueOtp } from '@/services/auth/auth.service.js
 import { getOtpSettings, invalidateOtpSettings } from '@/services/settings/otp-settings.service.js';
 import { getMe, updateMe } from '@/services/users/users.service.js';
 import { registerProvider, getMyProvider } from '@/services/providers/providers.service.js';
+import { rateBooking, getBookingRating } from '@/services/bookings/ratings.service.js';
 import { adminPasswordStep, adminOtpStep } from '@/services/admin/admin-auth.service.js';
 import {
   setUserRole,
@@ -1410,4 +1411,151 @@ test('confirm and webhook together settle exactly once', async () => {
   expect(b.handled).toBe(true);
   // Exactly one of the two did the settling.
   expect([a.alreadyPaid, (b as { alreadyPaid?: boolean }).alreadyPaid].filter(Boolean)).toHaveLength(1);
+});
+
+// --- Ratings ------------------------------------------------------------------
+// The search listing has always shown a provider average with nothing feeding
+// it, so every partner read as unrated forever. This is the source.
+
+async function completedTrip(pricePerKmPaise = 1000) {
+  const customer = await createUser();
+  const { owner, provider, vehicle } = await bookableVehicle(pricePerKmPaise);
+  const driver = await createDriver(owner.id, { name: 'Ravi', phone: '9876500077' });
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id,
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 300 * 3600 * 1000),
+    tripType: 'one_way',
+  });
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id);
+  return { customer, owner, provider, booking };
+}
+
+async function providerRow(id: string) {
+  const [row] = await db.select().from(serviceProviders).where(eq(serviceProviders.id, id));
+  return row;
+}
+
+test('rating a completed trip records it and moves the provider average', async () => {
+  const { customer, provider, booking } = await completedTrip();
+  const before = await providerRow(provider.id);
+  expect(before.ratingCount).toBe(0);
+
+  const rating = await rateBooking(customer.id, booking.id, { rating: 5, comment: 'On time' });
+  expect(rating.rating).toBe(5);
+  expect(rating.comment).toBe('On time');
+
+  const after = await providerRow(provider.id);
+  expect(after.ratingCount).toBe(1);
+  expect(after.ratingSum).toBe(5);
+});
+
+// The average the search listing shows now has a source.
+test('the provider average shown in search reflects the ratings', async () => {
+  const a = await completedTrip(1000);
+  await rateBooking(a.customer.id, a.booking.id, { rating: 4 });
+
+  const listing = await listAvailableVehicles('Delhi', 'Agra');
+  const mine = listing.vehicles.find((v) => v.providerId === a.provider.id);
+  expect(mine!.providerRatingAvg).toBe(4);
+  expect(mine!.providerRatingCount).toBe(1);
+});
+
+// Rating a trip that never ran would let a partner's average be moved by
+// bookings they never performed - the obvious way to attack a competitor.
+test('only a completed trip can be rated', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 400 * 3600 * 1000), tripType: 'one_way',
+  });
+  await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
+});
+
+test('a cancelled trip cannot be rated', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 500 * 3600 * 1000), tripType: 'one_way',
+  });
+  await cancelMyBooking(customer.id, booking.id);
+  await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
+});
+
+test('only the customer who took the trip can rate it', async () => {
+  const { booking } = await completedTrip();
+  const stranger = await createUser();
+  await expectReject(rateBooking(stranger.id, booking.id, { rating: 1 }), 404);
+});
+
+// The database enforces one rating per trip, so two submissions cannot both
+// count toward the average.
+test('a trip cannot be rated twice', async () => {
+  const { customer, provider, booking } = await completedTrip();
+  await rateBooking(customer.id, booking.id, { rating: 5 });
+  await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
+
+  const after = await providerRow(provider.id);
+  expect(after.ratingCount).toBe(1);
+  expect(after.ratingSum).toBe(5);
+});
+
+test('two simultaneous ratings for one trip: exactly one counts', async () => {
+  const { customer, provider, booking } = await completedTrip();
+  const results = await Promise.allSettled([
+    rateBooking(customer.id, booking.id, { rating: 5 }),
+    rateBooking(customer.id, booking.id, { rating: 1 }),
+  ]);
+  expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+
+  const after = await providerRow(provider.id);
+  expect(after.ratingCount).toBe(1);
+});
+
+// Aggregates must not drift: the average is derived from sum and count, so a
+// lost increment is permanent.
+test('ratings across several trips accumulate correctly', async () => {
+  const owner = await createUser();
+  const provider = await registerProvider(owner.id, AGENCY, ctx);
+  await setProviderStatus(provider.id, 'approved');
+  const [type] = await db
+    .insert(vehicleTypes).values({ category: 'car', name: 'RateType', seats: 4, bags: 2 }).returning();
+
+  const scores = [5, 4, 3];
+  for (const [i, score] of scores.entries()) {
+    const [vehicle] = await db
+      .insert(vehicles)
+      .values({ serviceProviderId: provider.id, vehicleTypeId: type.id, pricePerKmPaise: 1000, status: 'approved', isActive: true })
+      .returning();
+    const driver = await createDriver(owner.id, { name: `D${i}`, phone: `98765001${i}0` });
+    const customer = await createUser();
+    const booking = await createBooking(customer.id, {
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+      pickupDatetime: new Date(Date.now() + (600 + i * 100) * 3600 * 1000), tripType: 'one_way',
+    });
+    await acceptBooking(owner.id, booking.id);
+    await assignDriver(owner.id, booking.id, driver.id);
+    await startTrip(owner.id, booking.id);
+    await completeTrip(owner.id, booking.id);
+    await rateBooking(customer.id, booking.id, { rating: score });
+  }
+
+  const row = await providerRow(provider.id);
+  expect(row.ratingCount).toBe(3);
+  expect(row.ratingSum).toBe(12); // 5 + 4 + 3
+  expect(row.ratingSum / row.ratingCount).toBe(4);
+});
+
+test('a rating can be read back, and is null before one exists', async () => {
+  const { customer, booking } = await completedTrip();
+  expect(await getBookingRating(customer.id, booking.id)).toBeNull();
+  await rateBooking(customer.id, booking.id, { rating: 4, comment: 'Good' });
+  const found = await getBookingRating(customer.id, booking.id);
+  expect(found!.rating).toBe(4);
 });

@@ -1,5 +1,10 @@
 import type { Request, Response } from 'express';
-import { createBookingBody, listBookingsQuery, confirmPaymentBody } from '@destow/contracts';
+import {
+  createBookingBody,
+  listBookingsQuery,
+  confirmPaymentBody,
+  createRatingBody,
+} from '@destow/contracts';
 import {
   createBooking,
   getMyBooking,
@@ -10,6 +15,7 @@ import {
   startPayment,
   confirmPayment,
 } from '../../services/bookings/payments.service.js';
+import { rateBooking, getBookingRating } from '../../services/bookings/ratings.service.js';
 import { parseOrThrow, uuidParam } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
 import { AppError } from '../../lib/http/errors.js';
@@ -53,4 +59,14 @@ export async function confirmPaymentController(req: Request, res: Response) {
       body.method,
     ),
   );
+}
+
+// --- Rating -------------------------------------------------------------------
+export async function rateBookingController(req: Request, res: Response) {
+  const body = parseOrThrow(createRatingBody, req.body);
+  ok(res, { rating: await rateBooking(callerId(req), uuidParam(req.params.id), body) }, 201);
+}
+
+export async function getRatingController(req: Request, res: Response) {
+  ok(res, { rating: await getBookingRating(callerId(req), uuidParam(req.params.id)) });
 }

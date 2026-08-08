@@ -6,6 +6,8 @@ import {
   cancelBookingController,
   startPaymentController,
   confirmPaymentController,
+  rateBookingController,
+  getRatingController,
 } from '../controllers/bookings/bookings.controller.js';
 import { requireAuth, requireRole, requireClient } from '../middleware/auth/auth.js';
 
@@ -25,3 +27,8 @@ bookingsRouter.post('/:id/cancel', cancelBookingController);
 // the gateway produced. The amount is never in either request.
 bookingsRouter.post('/:id/pay', startPaymentController);
 bookingsRouter.post('/:id/pay/confirm', confirmPaymentController);
+
+// One rating per completed trip. Feeds the provider average the search listing
+// already shows.
+bookingsRouter.post('/:id/rating', rateBookingController);
+bookingsRouter.get('/:id/rating', getRatingController);
