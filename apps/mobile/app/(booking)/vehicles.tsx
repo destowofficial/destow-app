@@ -1,146 +1,165 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Animated } from 'react-native';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GradientHeader } from '../../components/ui/GradientHeader';
-import { FilterTabs } from '../../components/ui/FilterTabs';
-import { VehicleCard } from '../../components/cards/VehicleCard';
-import { GradientButton } from '../../components/ui/GradientButton';
-import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
+import React, { useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import type { VehicleCategory } from '@destow/contracts';
+import {
+  Card,
+  Chips,
+  Empty,
+  ErrorState,
+  Header,
+  Loading,
+  Row,
+  Screen,
+  Small,
+} from '../../components/ui/kit';
+import { color, weight } from '../../theme/tokens';
+import { f, s } from '../../theme/responsive';
+import { listAvailableVehicles } from '../../services/destow';
+import { useAsync } from '../../hooks/useAsync';
+import { rupees, km } from '../../lib/format';
 import { useBookingStore } from '../../stores/useBookingStore';
-import { searchVehicles } from '../../services/api';
-import type { Vehicle } from '../../services/types';
-import { colors } from '../../theme/colors';
-import { spacing } from '../../theme/spacing';
 
-export default function VehicleSelection() {
-  const router = useRouter();
-  const { fromCity, toCity, distance, selectedVehicle, selectVehicle } = useBookingStore();
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [filter, setFilter] = useState('All');
-  const [loading, setLoading] = useState(true);
-  const slideAnim = React.useRef(new Animated.Value(100)).current;
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'car', label: 'Car' },
+  { key: 'suv', label: 'SUV' },
+  { key: 'bus', label: 'Bus' },
+];
 
-  useEffect(() => {
-    loadVehicles();
-  }, []);
+// The catalogue, priced. Every row carries the total for the whole round trip
+// rather than only the per-kilometre rate: the rate on its own is a number
+// nobody can act on, and it is the total that decides which car someone picks.
+export default function Vehicles() {
+  const { from, to, setVehicle } = useBookingStore();
+  const [filter, setFilter] = useState('all');
 
-  useEffect(() => {
-    if (selectedVehicle) {
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(slideAnim, {
-        toValue: 100,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [selectedVehicle]);
+  const listing = useAsync(
+    () =>
+      listAvailableVehicles({
+        from,
+        to,
+        ...(filter === 'all' ? {} : { category: filter as VehicleCategory }),
+      }),
+    [from, to, filter],
+  );
 
-  const loadVehicles = async () => {
-    setLoading(true);
-    const { data } = await searchVehicles({
-      from: fromCity,
-      to: toCity,
-      date: '',
-      passengers: 1,
-    });
-    setVehicles(data);
-    setLoading(false);
-  };
-
-  const filtered = filter === 'All'
-    ? vehicles
-    : vehicles.filter((v) => v.category === filter);
+  const route = listing.data?.route;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <GradientHeader
-        title="Select Vehicle"
-        subtitle={`${fromCity} → ${toCity} • ${distance} km`}
-        showBack
+    <Screen>
+      <Header
+        title={listing.data ? `${listing.data.totalAvailable} vehicles` : 'Vehicles'}
         onBack={() => router.back()}
       />
 
-      <View style={styles.tabsContainer}>
-        <FilterTabs
-          tabs={['All', 'Bus', 'Car']}
-          activeTab={filter}
-          onTabChange={setFilter}
-          variant="header"
-        />
+      <View style={styles.sub}>
+        <Small>
+          {from} ⇄ {to}
+          {route ? ` · est. ${km(route.distanceM * 2)}` : ''}
+        </Small>
       </View>
 
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.list}>
-          {loading ? (
-            <LoadingSkeleton count={4} variant="card" />
-          ) : (
-            filtered.map((vehicle) => (
-              <VehicleCard
-                key={vehicle.id}
-                vehicle={vehicle}
-                selected={selectedVehicle?.id === vehicle.id}
-                onPress={() => selectVehicle(vehicle)}
-                distance={distance}
-              />
-            ))
-          )}
-        </View>
-        <View style={{ height: 120 }} />
-      </ScrollView>
+      <View style={styles.filters}>
+        <Chips options={FILTERS} value={filter} onChange={setFilter} />
+      </View>
 
-      {selectedVehicle && (
-        <Animated.View
-          style={[
-            styles.bottomBar,
-            { transform: [{ translateY: slideAnim }] },
-          ]}
-        >
-          <GradientButton
-            title="Continue to Fare Details"
-            onPress={() => router.push('/(booking)/fare')}
-          />
-        </Animated.View>
+      {listing.loading ? (
+        <Loading label="Pricing the route…" />
+      ) : listing.error ? (
+        <ErrorState message={listing.error} onRetry={listing.reload} />
+      ) : (listing.data?.vehicles.length ?? 0) === 0 ? (
+        <Empty
+          title="Nothing on this route yet"
+          body="No operator is serving these dates. Try a different date or a nearby city."
+        />
+      ) : (
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {listing.data!.vehicles.map((v) => (
+            <Card
+              key={v.vehicleId}
+              onPress={() => {
+                setVehicle(v, listing.data!.route);
+                router.push('/(booking)/review');
+              }}
+            >
+              <Row style={styles.head}>
+                <View style={styles.headText}>
+                  <Text style={styles.name}>{v.vehicleTypeName}</Text>
+                  {v.modelName ? <Small>{v.modelName}</Small> : null}
+                </View>
+                <View style={styles.seats}>
+                  <Ionicons name="person-outline" size={f(12)} color={color.blueDark} />
+                  <Text style={styles.seatsText}>{v.seats}</Text>
+                </View>
+              </Row>
+
+              <Row>
+                <View style={styles.meta}>
+                  <View style={styles.rating}>
+                    <Ionicons
+                      name="star"
+                      size={f(12)}
+                      color={v.providerRatingAvg ? color.star : color.dim}
+                    />
+                    <Text style={styles.ratingText}>
+                      {v.providerRatingAvg ? v.providerRatingAvg.toFixed(1) : 'New'}
+                    </Text>
+                    <Small> · {v.providerName}</Small>
+                  </View>
+                  <Small>
+                    {rupees(v.pricePerKmPaise)}/km
+                    {route ? ` · est. ${km(route.distanceM * 2)}` : ''}
+                  </Small>
+                </View>
+                <Text style={styles.fare}>{v.totalFareDisplay}</Text>
+              </Row>
+            </Card>
+          ))}
+
+          {listing.data!.truncated ? (
+            <Small style={styles.truncated}>
+              Showing the {listing.data!.vehicles.length} cheapest of {listing.data!.totalAvailable}.
+            </Small>
+          ) : null}
+
+          <Small style={styles.footnote}>
+            Prices are an estimate for the round trip. You pay for the kilometres actually driven.
+          </Small>
+        </ScrollView>
       )}
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.primary[600],
+  sub: { paddingHorizontal: s(18), marginTop: -s(8) },
+  filters: { paddingHorizontal: s(18), paddingVertical: s(13) },
+  list: { paddingHorizontal: s(18), paddingBottom: s(28), gap: s(11) },
+  head: { marginBottom: s(9), alignItems: 'flex-start' },
+  headText: { flex: 1 },
+  name: { fontSize: f(15), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.2 },
+  seats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(4),
+    backgroundColor: color.blueWash,
+    paddingHorizontal: s(9),
+    paddingVertical: s(3),
+    borderRadius: 999,
   },
-  container: {
-    flex: 1,
-    backgroundColor: colors.neutral[50],
+  seatsText: { fontSize: f(10.5), fontWeight: weight.bold, color: color.blueDark },
+  meta: { flex: 1, gap: s(2) },
+  rating: { flexDirection: 'row', alignItems: 'center', gap: s(4) },
+  ratingText: { fontSize: f(11.5), fontWeight: weight.bold, color: color.ink },
+  fare: {
+    fontSize: f(19),
+    fontWeight: weight.black,
+    color: color.ink,
+    letterSpacing: -0.6,
+    fontVariant: ['tabular-nums'],
   },
-  tabsContainer: {
-    backgroundColor: colors.primary[600],
-    paddingHorizontal: spacing.base,
-    paddingBottom: spacing.base,
-  },
-  list: {
-    padding: spacing.base,
-    gap: spacing.base,
-  },
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: colors.neutral[200],
-    padding: spacing.base,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 12,
-  },
+  truncated: { textAlign: 'center', marginTop: s(4) },
+  footnote: { textAlign: 'center', marginTop: s(8), paddingHorizontal: s(12) },
 });

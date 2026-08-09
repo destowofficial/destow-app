@@ -1,288 +1,199 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../theme/colors';
-import { typography } from '../../theme/typography';
-import { spacing, radii, shadows } from '../../theme/spacing';
-import { SearchCard } from '../../components/cards/SearchCard';
-import { PopularRouteCard } from '../../components/cards/PopularRouteCard';
-import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
-import { fetchPopularRoutes } from '../../services/api';
-import type { PopularRoute } from '../../services/types';
+import { Card, ErrorState, H2, Hero, Label, Loading, P, Row, Screen, Small } from '../../components/ui/kit';
+import { color, radius, shadow, weight } from '../../theme/tokens';
+import { f, s } from '../../theme/responsive';
+import { listCities, listPopularRoutes } from '../../services/destow';
+import { useAsync } from '../../hooks/useAsync';
+import { rupees, km } from '../../lib/format';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { useBookingStore } from '../../stores/useBookingStore';
 
+// One job: start a search. Popular routes are observed from real bookings rather
+// than curated, so an empty shelf on a young deployment is honest - the city
+// list carries the screen until there is demand to show.
 export default function Home() {
-  const router = useRouter();
-  const [popularRoutes, setPopularRoutes] = useState<PopularRoute[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { fromCity, toCity, setFromCity, setToCity } = useBookingStore();
+  const user = useAuthStore((st) => st.user);
+  const setRoute = useBookingStore((st) => st.setRoute);
 
-  useEffect(() => {
-    loadPopularRoutes();
-  }, []);
+  const routes = useAsync(listPopularRoutes, []);
+  const cities = useAsync(listCities, []);
 
-  const loadPopularRoutes = async () => {
-    setLoading(true);
-    const { data } = await fetchPopularRoutes();
-    setPopularRoutes(data);
-    setLoading(false);
-  };
+  const greeting = (() => {
+    const h = new Date().getHours();
+    return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  })();
+
+  function start(from?: string, to?: string) {
+    setRoute({ from: from ?? '', to: to ?? '' });
+    router.push('/(booking)/plan');
+  }
+
+  const loading = routes.loading && cities.loading;
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <LinearGradient
-          colors={colors.primary.gradient as any}
-          style={styles.header}
-        >
-          <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
-              <Image
-                source={require('../../assets/logo.png')}
-                style={styles.headerLogo}
-                resizeMode="contain"
-              />
-              <View>
-                <Text style={styles.headerTitle}>DESTOW</Text>
-                <Text style={styles.headerSubtitle}>Your Journey Awaits</Text>
+    <Screen>
+      <Hero>
+        <Row style={styles.heroRow}>
+          <View>
+            <Text style={styles.greeting}>{greeting}</Text>
+            <H2 style={styles.name}>{user?.name?.split(' ')[0] ?? 'there'}</H2>
+          </View>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials(user?.name)}</Text>
+          </View>
+        </Row>
+      </Hero>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollBody}
+        showsVerticalScrollIndicator={false}
+      >
+        <Card lift style={styles.search}>
+          <Pressable onPress={() => start()} accessibilityRole="button">
+            <View style={styles.leg}>
+              <Ionicons name="ellipse-outline" size={f(17)} color={color.ok} />
+              <View style={styles.legText}>
+                <Label>From</Label>
+                <Text style={styles.legValue}>Delhi</Text>
               </View>
             </View>
-            <TouchableOpacity
-              onPress={() => router.push('/(tabs)/profile')}
-              style={styles.profileButton}
-              activeOpacity={0.7}
-              accessibilityLabel="Go to profile"
-            >
-              <Ionicons name="person" size={20} color={colors.white} />
-            </TouchableOpacity>
-          </View>
+            <View style={styles.legDivider} />
+            <View style={styles.leg}>
+              <Ionicons name="location-outline" size={f(17)} color={color.red} />
+              <View style={styles.legText}>
+                <Label>To</Label>
+                <Text style={[styles.legValue, styles.legPlaceholder]}>Where are you going?</Text>
+              </View>
+            </View>
+            <View style={styles.searchCta}>
+              <Ionicons name="search" size={f(16)} color={color.white} />
+              <Text style={styles.searchCtaText}>Search</Text>
+            </View>
+          </Pressable>
+        </Card>
 
-          <View style={styles.searchCardContainer}>
-            <SearchCard
-              from={fromCity || undefined}
-              to={toCity || undefined}
-              onPress={() => router.push('/(booking)/search')}
+        {loading ? (
+          <View style={styles.block}>
+            <Loading />
+          </View>
+        ) : routes.error && cities.error ? (
+          <View style={styles.block}>
+            <ErrorState
+              message={routes.error}
+              onRetry={() => {
+                routes.reload();
+                cities.reload();
+              }}
             />
           </View>
-        </LinearGradient>
-
-        {/* Choose Your Ride */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Choose Your Ride</Text>
-          <View style={styles.serviceGrid}>
-            <TouchableOpacity
-              onPress={() => router.push('/(booking)/search')}
-              activeOpacity={0.8}
-              style={styles.serviceCard}
-            >
-              <View style={[styles.serviceIcon, { backgroundColor: colors.primary[50] }]}>
-                <Ionicons name="bus" size={28} color={colors.primary[600]} />
-              </View>
-              <Text style={styles.serviceName}>Bus</Text>
-              <Text style={styles.serviceDesc}>Comfortable travel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => router.push('/(booking)/search')}
-              activeOpacity={0.8}
-              style={styles.serviceCard}
-            >
-              <View style={[styles.serviceIcon, { backgroundColor: colors.success[50] }]}>
-                <Ionicons name="car" size={28} color={colors.success[600]} />
-              </View>
-              <Text style={styles.serviceName}>Car</Text>
-              <Text style={styles.serviceDesc}>Private & flexible</Text>
-            </TouchableOpacity>
+        ) : (routes.data?.length ?? 0) > 0 ? (
+          <View style={styles.section}>
+            <H2 style={styles.sectionTitle}>Popular routes</H2>
+            {routes.data!.slice(0, 6).map((r) => (
+              <Card key={`${r.from}-${r.to}`} style={styles.row} onPress={() => start(r.from, r.to)}>
+                <Row>
+                  <View style={styles.plate}>
+                    <Ionicons name="location-outline" size={f(18)} color={color.blue} />
+                  </View>
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>
+                      {r.from} ⇄ {r.to}
+                    </Text>
+                    <Small>{r.bookings} trips booked</Small>
+                  </View>
+                  <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+                </Row>
+              </Card>
+            ))}
           </View>
-
-          {/* Value Proposition */}
-          <LinearGradient
-            colors={[colors.success[500], colors.primary[600]]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.valueBanner}
-          >
-            <View style={styles.valueIcon}>
-              <Ionicons name="star" size={24} color={colors.white} />
-            </View>
-            <View>
-              <Text style={styles.valueTitle}>Transparent ₹/km Pricing</Text>
-              <Text style={styles.valueDesc}>No hidden charges, ever!</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        {/* Popular Routes */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Popular Routes</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
+        ) : (
+          <View style={styles.section}>
+            <H2 style={styles.sectionTitle}>Where to?</H2>
+            <P style={styles.sectionNote}>
+              We run outstation round trips across {cities.data?.length ?? 0} cities.
+            </P>
+            {(cities.data ?? []).slice(0, 8).map((c) => (
+              <Card key={c.id} style={styles.row} onPress={() => start('Delhi', c.name)}>
+                <Row>
+                  <View style={styles.plate}>
+                    <Ionicons name="location-outline" size={f(18)} color={color.blue} />
+                  </View>
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle}>{c.name}</Text>
+                    {c.state ? <Small>{c.state}</Small> : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+                </Row>
+              </Card>
+            ))}
           </View>
-          {loading ? (
-            <LoadingSkeleton count={3} variant="listItem" />
-          ) : (
-            <View style={styles.routesList}>
-              {popularRoutes.map((route, index) => (
-                <PopularRouteCard
-                  key={index}
-                  route={route}
-                  onPress={() => {
-                    setFromCity(route.from);
-                    setToCity(route.to);
-                    router.push('/(booking)/search');
-                  }}
-                />
-              ))}
-            </View>
-          )}
-        </View>
-
-        <View style={{ height: 100 }} />
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
+function initials(name?: string | null): string {
+  if (!name) return '·';
+  return name
+    .split(' ')
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.primary[600],
-  },
-  container: {
-    flex: 1,
-    backgroundColor: colors.neutral[50],
-  },
-  header: {
-    paddingTop: spacing.base,
-    paddingBottom: spacing.xxxl,
-    paddingHorizontal: spacing.base,
-    borderBottomLeftRadius: radii.xxl,
-    borderBottomRightRadius: radii.xxl,
-    ...shadows.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  headerLogo: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-  },
-  headerTitle: {
-    fontSize: typography.sizes.xl,
-    fontFamily: `${typography.fontFamily}_700Bold`,
-    color: colors.white,
-  },
-  headerSubtitle: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
-  },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  heroRow: { paddingTop: s(6) },
+  greeting: { color: 'rgba(255,255,255,0.8)', fontSize: f(12.5) },
+  name: { color: color.white },
+  avatar: {
+    width: s(38),
+    height: s(38),
+    borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  searchCardContainer: {
-    marginTop: spacing.sm,
-  },
-  section: {
-    paddingHorizontal: spacing.base,
-    paddingTop: spacing.xl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.base,
-  },
-  sectionTitle: {
-    fontSize: typography.sizes.lg,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.neutral[900],
-    marginBottom: spacing.base,
-  },
-  seeAll: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.primary[600],
-  },
-  serviceGrid: {
-    flexDirection: 'row',
-    gap: spacing.base,
-    marginBottom: spacing.base,
-  },
-  serviceCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: radii.xl,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.neutral[100],
-    ...shadows.sm,
-  },
-  serviceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: radii.md,
+  avatarText: { color: color.white, fontSize: f(14), fontWeight: weight.bold },
+
+  scroll: { flex: 1, marginTop: -s(26) },
+  scrollBody: { paddingBottom: s(28) },
+  search: { marginHorizontal: s(18), padding: s(6) },
+  leg: { flexDirection: 'row', alignItems: 'center', gap: s(11), padding: s(11) },
+  legText: { flex: 1 },
+  legValue: { fontSize: f(14.5), fontWeight: weight.semi, color: color.ink },
+  legPlaceholder: { color: color.dim, fontWeight: weight.medium },
+  legDivider: { height: 1, backgroundColor: color.line, marginLeft: s(40) },
+  searchCta: {
+    height: s(42),
+    borderRadius: radius.md,
+    backgroundColor: color.blue,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  serviceName: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.neutral[900],
-    marginBottom: 2,
-  },
-  serviceDesc: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[500],
-  },
-  valueBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.base,
-    borderRadius: radii.xl,
+    gap: s(8),
+    margin: s(5),
+    ...shadow.blue,
   },
-  valueIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  searchCtaText: { color: color.white, fontSize: f(14.5), fontWeight: weight.bold },
+
+  block: { height: s(200) },
+  section: { marginTop: s(22), paddingHorizontal: s(18), gap: s(9) },
+  sectionTitle: { marginBottom: s(2) },
+  sectionNote: { marginBottom: s(4) },
+  row: { padding: s(12) },
+  rowText: { flex: 1 },
+  rowTitle: { fontSize: f(14), fontWeight: weight.semi, color: color.ink },
+  plate: {
+    width: s(36),
+    height: s(36),
+    borderRadius: radius.md,
+    backgroundColor: color.blueWash,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  valueTitle: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_700Bold`,
-    color: colors.white,
-  },
-  valueDesc: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: 'rgba(255,255,255,0.9)',
-  },
-  routesList: {
-    gap: spacing.base,
   },
 });
