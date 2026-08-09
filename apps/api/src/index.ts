@@ -26,6 +26,24 @@ const allowedOrigins = env.CORS_ORIGINS.split(',')
   .filter(Boolean);
 const corsOrigin =
   env.CORS_ORIGINS.trim() === '*' ? true : allowedOrigins.length > 0 ? allowedOrigins : false;
+// Security headers, written out rather than pulled from helmet. This is a JSON
+// API: most of helmet is HTML-oriented (CSP, COEP/CORP) and would be switched
+// off anyway, leaving six headers - not worth a dependency and a types cast for
+// Express 5. Stating them here also makes it obvious what we actually send.
+app.disable('x-powered-by'); // stop advertising the framework and its version
+app.use((_req, res, next) => {
+  // Browsers ignore HSTS over plain HTTP, so this is inert locally and takes
+  // effect once Caddy terminates TLS.
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  // Responses are JSON; never let a browser guess otherwise and execute one.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Nothing here is meant to be framed, and a framed API response is only ever
+  // part of someone else's attack.
+  res.setHeader('X-Frame-Options', 'DENY');
+  // Paths carry booking and user ids, so never leak them to a third party.
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 app.use(cors({ origin: corsOrigin, credentials: true }));
 // Webhook signatures are computed over the exact bytes the gateway sent, so a
 // re-serialized JSON object will not verify. Keep the raw body, but only for
