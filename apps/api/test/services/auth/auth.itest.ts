@@ -34,6 +34,7 @@ import {
   listAvailableVehicles,
   listCities,
   listPopularRoutes,
+  invalidatePopularRoutes,
 } from '@/services/search/search.service.js';
 import {
   createBooking,
@@ -1936,6 +1937,9 @@ test('popular routes reflect real bookings', async () => {
       tripType: 'one_way',
     });
   }
+  // The list is cached for an hour, so without this the assertion below reads a
+  // ranking computed before these bookings existed.
+  await invalidatePopularRoutes();
   const routes = await listPopularRoutes();
   const delhiManali = routes.find((r) => r.from === 'Delhi' && r.to === 'Manali');
   expect(delhiManali).toBeDefined();
@@ -1953,8 +1957,48 @@ test('cancelled trips do not count as demand', async () => {
   });
   await cancelMyBooking(customer.id, b.id);
 
+  // Without invalidating, this passes for the wrong reason: the cached list
+  // predates the booking, so Kolkata-Digha is absent whether or not cancelled
+  // trips are excluded.
+  await invalidatePopularRoutes();
   const routes = await listPopularRoutes();
   expect(routes.find((r) => r.from === 'Kolkata' && r.to === 'Digha')).toBeUndefined();
+});
+
+// The ranking is an aggregate over every booking ever taken - the one read path
+// whose cost tracks the whole table rather than an index seek. Measured at 500k
+// rows it is a parallel sequential scan, and it sits on the home screen, so it
+// is cached rather than recomputed per request.
+test('the popular routes ranking is served from cache until invalidated', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+
+  await invalidatePopularRoutes();
+  const before = await listPopularRoutes();
+  const countOf = (rs: Awaited<ReturnType<typeof listPopularRoutes>>) =>
+    rs.find((r) => r.from === 'Surat' && r.to === 'Daman')?.bookings ?? 0;
+
+  await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Surat', to: 'Daman',
+    pickupDatetime: new Date(Date.now() + 2800 * 3600 * 1000), tripType: 'one_way',
+  });
+
+  // A new booking does not move the ranking while the cached list is live -
+  // that staleness is the trade being made for not scanning the table.
+  expect(countOf(await listPopularRoutes())).toBe(countOf(before));
+
+  await invalidatePopularRoutes();
+  expect(countOf(await listPopularRoutes())).toBe(countOf(before) + 1);
+});
+
+// One hot key shared by every customer: when it expires under load, without
+// single-flight every in-flight request starts its own scan of the table.
+test('concurrent callers on a cold cache share one computation', async () => {
+  await invalidatePopularRoutes();
+  const results = await Promise.all(Array.from({ length: 10 }, () => listPopularRoutes()));
+  // Same list object identity is not guaranteed across the cache round-trip, but
+  // the values must agree - a stampede that raced would produce divergent lists.
+  for (const r of results) expect(r).toEqual(results[0]);
 });
 
 // --- Payment amount reconciliation (#47) --------------------------------------

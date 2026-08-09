@@ -18,6 +18,8 @@ import {
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
+import { redis, observeRedis } from '../../db/redis.js';
+import { safeError } from '../../lib/log/safe.js';
 
 // The customer-facing quote. Distance comes from the maps adapter (cached), and
 // the fare from the pricing engine - the client supplies neither.
@@ -157,10 +159,77 @@ export async function listCities(): Promise<City[]> {
     .orderBy(cities.name);
 }
 
+// Popularity is an aggregate over every booking ever taken, so unlike the other
+// read paths it has no key to seek on and its cost tracks the size of the whole
+// table. Measured at 500k bookings it is a parallel sequential scan: ~32ms of
+// wall clock but three CPU cores' worth of work, and this sits on the home
+// screen, so it is the highest-traffic query in the product. An hour of
+// staleness in a "where people go" list costs nothing; the scan costs the box.
+const POPULAR_ROUTES_TTL_SEC = 60 * 60;
+const POPULAR_ROUTES_KEY = 'popular_routes';
+
+// Single-flight per process. The route cache can skip this because its keys are
+// per city pair and rarely contended, but this is one hot key shared by every
+// customer: without it, the moment it expires under load every in-flight request
+// starts its own scan.
+// Keyed by limit, not a single slot: two concurrent callers asking for
+// different lengths must not be handed each other's list.
+const popularRoutesInFlight = new Map<string, Promise<PopularRoute[]>>();
+
 // Observed, not curated: the routes customers actually book. Empty until there
 // are bookings, which is honest - a hardcoded list would claim popularity we
 // have not seen, and this one improves itself.
 export async function listPopularRoutes(limit = 8): Promise<PopularRoute[]> {
+  const key = `${POPULAR_ROUTES_KEY}:${limit}`;
+
+  try {
+    const cached = await observeRedis('get', () => redis.get(key));
+    if (cached) {
+      const parsed = JSON.parse(cached) as PopularRoute[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    // Same rule as the route cache: a cache problem degrades to a slower home
+    // screen, never a broken one.
+    console.error(`[search] popular routes cache read failed, falling through: ${safeError(err)}`);
+  }
+
+  const existing = popularRoutesInFlight.get(key);
+  if (existing) return existing;
+
+  const pending = computePopularRoutes(limit)
+    .then(async (routes) => {
+      try {
+        await observeRedis('set', () =>
+          redis.set(key, JSON.stringify(routes), 'EX', POPULAR_ROUTES_TTL_SEC),
+        );
+      } catch (err) {
+        console.error(`[search] popular routes cache write failed: ${safeError(err)}`);
+      }
+      return routes;
+    })
+    .finally(() => {
+      popularRoutesInFlight.delete(key);
+    });
+
+  popularRoutesInFlight.set(key, pending);
+  return pending;
+}
+
+// Drops the cached list so the next caller recomputes. Production has no need to
+// call this - an hour of staleness is the deal - but a test that books a trip
+// and then asserts on the ranking must not be served a list computed before it.
+export async function invalidatePopularRoutes(): Promise<void> {
+  popularRoutesInFlight.clear();
+  try {
+    const keys = await observeRedis('keys', () => redis.keys(`${POPULAR_ROUTES_KEY}:*`));
+    if (keys.length > 0) await observeRedis('del', () => redis.del(...keys));
+  } catch (err) {
+    console.error(`[search] popular routes cache invalidation failed: ${safeError(err)}`);
+  }
+}
+
+async function computePopularRoutes(limit: number): Promise<PopularRoute[]> {
   const rows = await db
     .select({
       from: bookings.fromLocation,
