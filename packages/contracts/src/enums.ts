@@ -43,22 +43,14 @@ export type PaymentStatus = (typeof PAYMENT_STATUS)[number];
 export const PAYMENT_METHOD = ['upi', 'card', 'cash', 'netbanking'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHOD)[number];
 
-// What a customer may actually pick. The column keeps every historic value, but
-// only these two are offered: UPI, charged automatically against a mandate once
-// the distance is agreed, and cash, settled with the driver at the end of the
-// trip. Cards and netbanking stay in the enum for rows that predate this and for
-// a future we have not committed to.
+// What a customer may actually pick, chosen when they pay rather than when they
+// book. UPI is a dynamic QR raised for the exact fare and scanned in their own
+// app; cash is handed to the driver, who confirms it. Cards and netbanking stay
+// in the enum for rows that predate this and for a future we have not committed
+// to - neither is offered.
 export const CUSTOMER_PAYMENT_METHOD = ['upi', 'cash'] as const;
 export type BookingPaymentMethod = (typeof CUSTOMER_PAYMENT_METHOD)[number];
 
-// A mandate is the customer's standing permission to be charged after a trip.
-// pending  - authorisation opened, the customer has not approved it yet
-// active   - approved and chargeable
-// revoked  - the customer withdrew it, or we replaced it with a newer one
-// expired  - past the date the customer agreed to
-const MANDATE_STATUS = ['pending', 'active', 'revoked', 'expired'] as const;
-export { MANDATE_STATUS };
-export type MandateStatus = (typeof MANDATE_STATUS)[number];
 
 export const TRIP_TYPE = ['one_way', 'round_trip'] as const;
 export type TripType = (typeof TRIP_TYPE)[number];

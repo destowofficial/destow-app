@@ -1,10 +1,11 @@
-import { and, count, desc, eq, sum } from 'drizzle-orm';
+import { and, count, desc, eq, ne, sum } from 'drizzle-orm';
 import type { BookingStatus, SubmitOdometerBody } from '@destow/contracts';
 import { db } from '../../db/connection.js';
 import { bookings, drivers, vehicles, vehicleTypes, users } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
 import { assertTransition } from '../../lib/bookings/lifecycle.js';
 import { formatPaise } from '../../lib/pricing/money.js';
+import { computeFare } from '../../lib/pricing/pricing.js';
 import { serviceProviders } from '../../db/schema.js';
 
 // The partner's side of a booking: accept it, put a driver on it, run it, finish
@@ -193,16 +194,56 @@ export async function completeTrip(
     });
   }
 
-  // completedAt is the date the trip happened. It is not the date revenue is
-  // earned any more - that is distanceConfirmedAt, because until the customer
-  // agrees the figure there is no amount to book.
+  // The fare is settled here rather than in a separate step the customer has to
+  // take. Paying is the agreement now: the customer sees these readings and this
+  // total on the payment screen, and handing over the money is the acceptance.
+  // Recomputed at the rate and commission frozen when the trip was booked, so a
+  // price change since then cannot reach a trip already driven.
+  const fare = computeFare({
+    pricePerKmPaise: booking.pricePerKmPaise,
+    distanceM: actualDistanceM,
+    commissionBps: booking.commissionBps,
+  });
+
   return transition(booking.id, booking.status, 'completed', {
     odometerStartKm: body.odometerStartKm,
     odometerEndKm: body.odometerEndKm,
     actualDistanceM,
     distanceSubmittedAt: new Date(),
     completedAt: new Date(),
+    totalFarePaise: fare.totalFarePaise,
+    commissionPaise: fare.commissionPaise,
+    providerPayoutPaise: fare.providerPayoutPaise,
   });
+}
+
+// The driver has the cash in hand. Sliding to confirm is the receipt, and it is
+// the driver's action rather than the customer's on purpose: the person holding
+// the money is the honest source, and a customer cannot close a trip they never
+// paid for.
+export async function confirmCashCollected(userId: string, bookingId: string) {
+  const { booking } = await ownBooking(userId, bookingId);
+
+  if (booking.status !== 'completed') {
+    throw AppError.conflict('That trip has not finished yet');
+  }
+  // Idempotent: a second slide, or a retry after a dropped response, returns the
+  // booking as it stands rather than settling twice.
+  if (booking.paymentStatus === 'paid') return booking;
+
+  const [updated] = await db
+    .update(bookings)
+    .set({
+      paymentStatus: 'paid',
+      paymentMethod: 'cash',
+      paidAt: new Date(),
+      // No transaction reference: nothing moved through a gateway. The driver
+      // took notes at the roadside, and this row is the whole record of it.
+    })
+    .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')))
+    .returning();
+
+  return updated ?? booking;
 }
 
 export interface ProviderEarnings {

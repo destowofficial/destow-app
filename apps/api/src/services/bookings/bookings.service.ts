@@ -18,7 +18,6 @@ import { AppError } from '../../lib/http/errors.js';
 import { assertTransition, canTransition } from '../../lib/bookings/lifecycle.js';
 import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
-import { chargeCustomer } from './mandates.service.js';
 import { safeError } from '../../lib/log/safe.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
@@ -60,7 +59,10 @@ function toCustomerBooking(r: Row): CustomerBooking {
     pickupDatetime: r.booking.pickupDatetime.toISOString(),
     returnDatetime: r.booking.returnDatetime?.toISOString() ?? null,
     pricePerKmPaise: r.booking.pricePerKmPaise,
-    paymentMethod: r.booking.paymentMethod === 'upi' ? 'upi' : 'cash',
+    paymentMethod:
+      r.booking.paymentMethod === 'upi' || r.booking.paymentMethod === 'cash'
+        ? r.booking.paymentMethod
+        : null,
     totalFarePaise: r.booking.totalFarePaise,
     totalFareDisplay: formatPaise(r.booking.totalFarePaise),
     // Falls back to the current total for rows written before the estimate was
@@ -207,7 +209,6 @@ export async function createBooking(
       tripType: body.tripType,
       pickupDatetime: body.pickupDatetime,
       returnDatetime: body.returnDatetime,
-      paymentMethod: body.paymentMethod,
       // --- rate and commission frozen; the amount is recomputed once, when
       //     the customer confirms the odometer ---
       pricePerKmPaise: fare.pricePerKmPaise,
@@ -353,35 +354,9 @@ async function recordCancellationFee(booking: typeof bookings.$inferSelect): Pro
     })
     .where(eq(bookings.id, booking.id));
 
-  if (breakdown.cancellationFeePaise === 0) return;
-
-  // A cash booking has no mandate to charge, so the fee is recorded and owed.
-  // Chasing it is a business decision, not something to fake here.
-  if (booking.paymentMethod === 'cash') return;
-
-  // The fee is a charge, not a deduction, because nothing was ever taken. It is
-  // recorded above first, so a gateway failure leaves it owed rather than lost.
-  const outcome = await chargeCustomer({
-    userId: booking.customerUserId,
-    bookingId: booking.id,
-    amountPaise: breakdown.cancellationFeePaise,
-  });
-
-  if (outcome.charged) {
-    await db
-      .update(bookings)
-      .set({
-        paymentStatus: 'paid',
-        paymentMethod: 'upi',
-        transactionRef: outcome.paymentId,
-        paidAt: new Date(),
-      })
-      .where(eq(bookings.id, booking.id));
-  } else {
-    console.error(
-      `[payments] cancellation fee for booking ${booking.id} not collected: ${outcome.reason}`,
-    );
-  }
+  // Nothing is stored that could be charged - a QR is raised per payment and
+  // dies with it - so a late-cancellation fee is recorded and owed. Chasing it
+  // is a business decision, not something to fake here.
 }
 
 // Return the fare, minus whatever the policy retains for the partner. Called
@@ -421,98 +396,6 @@ async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Pr
   }
 }
 
-// The customer agrees the distance, and only then does the fare become real.
-//
-// This is the hinge of the whole postpaid model. Everything before it is an
-// estimate; everything after it is money. It is deliberately the customer's
-// action rather than an automatic settle on completion, because the party
-// entering the odometer is also the party being paid from it - without a
-// confirmation step the driver sets the price unilaterally.
-export async function confirmTripDistance(
-  customerUserId: string,
-  bookingId: string,
-): Promise<CustomerBooking> {
-  const [existing] = await db
-    .select()
-    .from(bookings)
-    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
-    .limit(1);
-  if (!existing) throw AppError.notFound('Booking not found');
-
-  if (existing.status !== 'completed' || existing.actualDistanceM === null) {
-    throw AppError.conflict('That trip has no distance to confirm yet');
-  }
-  // Idempotent: a second tap, or a retry after a dropped response, returns the
-  // booking as it already stands rather than recomputing and re-charging.
-  if (existing.distanceConfirmedAt) return getMyBooking(customerUserId, bookingId);
-
-  // Recomputed from the odometer at the rate and commission frozen when the
-  // trip was booked. A price rise or a commission change since then must not
-  // reach a trip that has already been driven.
-  const fare = computeFare({
-    pricePerKmPaise: existing.pricePerKmPaise,
-    distanceM: existing.actualDistanceM,
-    commissionBps: existing.commissionBps,
-  });
-
-  // Claimed with distance_confirmed_at IS NULL in the WHERE, so two concurrent
-  // confirmations cannot both rewrite the fare - and, below, cannot both charge.
-  const [updated] = await db
-    .update(bookings)
-    .set({
-      totalFarePaise: fare.totalFarePaise,
-      commissionPaise: fare.commissionPaise,
-      providerPayoutPaise: fare.providerPayoutPaise,
-      distanceConfirmedAt: new Date(),
-    })
-    .where(and(eq(bookings.id, bookingId), isNull(bookings.distanceConfirmedAt)))
-    .returning({ id: bookings.id });
-  // Lost the race: the other caller is charging. Return what it settled on
-  // rather than charging a second time.
-  if (!updated) return getMyBooking(customerUserId, bookingId);
-
-  // Approving the distance is the customer agreeing the amount, so this is the
-  // moment it settles. Claiming the confirmation first means this runs exactly
-  // once - settling before claiming would let a double tap pay twice.
-  if (existing.paymentMethod === 'cash') {
-    // The customer hands the fare to the driver. Nothing moves through us, so
-    // there is nothing to charge and nothing that can fail - agreeing the
-    // distance is the whole settlement. Destow's commission on it becomes a
-    // receivable from the partner, who has collected the full fare; see
-    // getEarnings, where the two directions are kept apart.
-    await db
-      .update(bookings)
-      .set({ paymentStatus: 'paid', paidAt: new Date() })
-      .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
-    return getMyBooking(customerUserId, bookingId);
-  }
-
-  const outcome = await chargeCustomer({
-    userId: customerUserId,
-    bookingId,
-    amountPaise: fare.totalFarePaise,
-  });
-
-  if (outcome.charged) {
-    await db
-      .update(bookings)
-      .set({
-        paymentStatus: 'paid',
-        transactionRef: outcome.paymentId,
-        paidAt: new Date(),
-      })
-      .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
-  } else {
-    // The trip happened and the distance is agreed, so the money is owed either
-    // way. Left unpaid and visible rather than rolled back - a customer whose
-    // mandate has gone must not get a free trip out of it.
-    console.error(
-      `[payments] booking ${bookingId} confirmed but not charged: ${outcome.reason}`,
-    );
-  }
-
-  return getMyBooking(customerUserId, bookingId);
-}
 
 // What cancelling right now would cost, so the customer sees the number before
 // they commit to it rather than discovering it afterwards.

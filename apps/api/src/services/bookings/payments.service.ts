@@ -1,9 +1,10 @@
 import { and, eq, ne } from 'drizzle-orm';
+import { formatPaise } from '../../lib/pricing/money.js';
 import type { PaymentMethod } from '@destow/contracts';
 import { db } from '../../db/connection.js';
 import { bookings } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
-import { payments, type PaymentSignature } from '../../lib/adapters/payments.js';
+import { payments } from '../../lib/adapters/payments.js';
 import { recordPaymentEvent } from '../../lib/metrics/metrics.js';
 import { safeError } from '../../lib/log/safe.js';
 
@@ -25,68 +26,91 @@ async function ownBooking(customerUserId: string, bookingId: string) {
   return row;
 }
 
-export interface PaymentIntent {
-  orderId: string;
+export interface QrPayment {
+  bookingId: string;
+  qrId: string;
+  // The UPI payload the client renders. Any UPI app reads it.
+  payload: string;
   amountPaise: number;
-  keyId: string;
-  provider: string;
+  amountDisplay: string;
+  expiresAt: string;
   alreadyPaid: boolean;
 }
 
-export async function startPayment(
+// Raise a QR for exactly what this trip cost.
+//
+// The amount is never in the request. The client asks for a QR for a booking;
+// the server decides what that booking is worth. There is nothing stored to
+// charge against and no standing permission - the QR is the whole
+// authorisation, and it dies with the payment.
+export async function startQrPayment(
   customerUserId: string,
   bookingId: string,
-): Promise<PaymentIntent> {
+): Promise<QrPayment> {
   const booking = await ownBooking(customerUserId, bookingId);
 
-  // Already settled: say so plainly instead of opening a second order the
-  // customer could pay against.
   if (booking.paymentStatus === 'paid') {
     return {
-      orderId: booking.paymentOrderId ?? '',
+      bookingId: booking.id,
+      qrId: '',
+      payload: '',
       amountPaise: booking.totalFarePaise,
-      keyId: '',
-      provider: payments.name,
+      amountDisplay: formatPaise(booking.totalFarePaise),
+      expiresAt: new Date().toISOString(),
       alreadyPaid: true,
     };
   }
   if (booking.status === 'cancelled') {
     throw AppError.conflict('That booking was cancelled');
   }
-
-  // Postpaid: what this trip costs is not known until the vehicle is back and
-  // the customer has agreed the odometer. Opening an order before that would
-  // take the estimate, and the booking would read 'paid' while a longer trip
-  // went partly unbilled - the operator absorbing the difference silently.
-  if (!booking.distanceConfirmedAt) {
-    throw AppError.conflict('This trip cannot be paid for until the distance is confirmed');
+  // The fare is only final once the driver has closed the trip with an
+  // odometer reading. Raising a QR before that would ask for the estimate.
+  if (booking.status !== 'completed' || booking.actualDistanceM === null) {
+    throw AppError.conflict('This trip cannot be paid for until it has finished');
   }
 
-  // Reuse the existing order rather than minting a new one per tap - otherwise a
-  // customer who backs out of the checkout and retries accumulates open orders,
-  // and a webhook for the abandoned one still resolves to this booking.
-  if (booking.paymentOrderId) {
-    return {
-      orderId: booking.paymentOrderId,
-      amountPaise: booking.totalFarePaise,
-      keyId: '',
-      provider: payments.name,
-      alreadyPaid: false,
-    };
-  }
-
-  // The amount comes from the frozen snapshot, never from the caller.
-  const order = await payments.createOrder({
+  const qr = await payments.createUpiQr({
     bookingId: booking.id,
     amountPaise: booking.totalFarePaise,
   });
 
   await db
     .update(bookings)
-    .set({ paymentOrderId: order.orderId })
+    .set({ paymentOrderId: qr.qrId, paymentMethod: 'upi' })
     .where(eq(bookings.id, booking.id));
 
-  return { ...order, provider: payments.name, alreadyPaid: false };
+  return {
+    bookingId: booking.id,
+    qrId: qr.qrId,
+    payload: qr.payload,
+    amountPaise: qr.amountPaise,
+    amountDisplay: formatPaise(qr.amountPaise),
+    expiresAt: qr.expiresAt,
+    alreadyPaid: false,
+  };
+}
+
+// What the QR screen polls while the customer is paying. Deliberately tiny: it
+// is called every couple of seconds by a phone with a QR on screen.
+export async function paymentStatus(
+  customerUserId: string,
+  bookingId: string,
+): Promise<{ bookingId: string; paymentStatus: string; paidAt: string | null }> {
+  const [row] = await db
+    .select({
+      id: bookings.id,
+      paymentStatus: bookings.paymentStatus,
+      paidAt: bookings.paidAt,
+    })
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
+    .limit(1);
+  if (!row) throw AppError.notFound('Booking not found');
+  return {
+    bookingId: row.id,
+    paymentStatus: row.paymentStatus,
+    paidAt: row.paidAt?.toISOString() ?? null,
+  };
 }
 
 // The atomic settle. The WHERE clause excludes already-paid rows, so a second
@@ -132,46 +156,6 @@ async function markPaid(
   return row?.status === 'cancelled' && row.paymentStatus !== 'paid' ? 'cancelled' : 'already_paid';
 }
 
-export async function confirmPayment(
-  customerUserId: string,
-  bookingId: string,
-  sig: PaymentSignature,
-  method?: PaymentMethod,
-) {
-  const booking = await ownBooking(customerUserId, bookingId);
-
-  // The signature is over the order id the gateway issued. Accepting a signature
-  // for a different order would let a real ₹1 payment settle a ₹9000 booking.
-  if (!booking.paymentOrderId || booking.paymentOrderId !== sig.orderId) {
-    recordPaymentEvent(payments.name, method ?? 'upi', 'order_mismatch');
-    throw AppError.badRequest('That payment does not belong to this booking');
-  }
-
-  if (!payments.verifyPayment(sig)) {
-    recordPaymentEvent(payments.name, method ?? 'upi', 'bad_signature');
-    // Deliberately vague: a client that can distinguish "wrong signature" from
-    // "wrong order" learns how to probe for a working combination.
-    throw AppError.badRequest('Payment could not be verified');
-  }
-
-  const outcome = await markPaid(booking.id, sig.paymentId, method);
-
-  // The trip was called off while this payment was in flight. The signature is
-  // real and the money is captured, so this is not a client error to hide - it
-  // is a refund we owe. Recorded loudly rather than swallowed as success.
-  if (outcome === 'cancelled') {
-    recordPaymentEvent(payments.name, method ?? 'upi', 'paid_after_cancel');
-    console.error(
-      `[payments] captured payment ${sig.paymentId} for cancelled booking ${booking.id} - refund owed`,
-    );
-    throw AppError.conflict('That booking was cancelled. The payment will be refunded.');
-  }
-
-  recordPaymentEvent(payments.name, method ?? 'upi', outcome === 'settled' ? 'paid' : 'duplicate');
-
-  return { bookingId: booking.id, paymentStatus: 'paid' as const, alreadyPaid: outcome === 'already_paid' };
-}
-
 // The safety net for the case the client never comes back - the app was killed
 // mid-checkout, or the network dropped after the customer's money moved. The
 // gateway is the source of truth, so this settles the booking with no customer
@@ -184,28 +168,32 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
     throw AppError.badRequest('Invalid webhook signature');
   }
 
-  let event: { orderId?: string; paymentId?: string; status?: string; amountPaise?: number };
+  let event: { qrId?: string; paymentId?: string; status?: string; amountPaise?: number };
   try {
     const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-    // Razorpay nests the entity; the stub sends it flat. Accept both so the
-    // shape can be pinned when real events are available to look at.
-    const entity =
-      ((parsed.payload as Record<string, Record<string, Record<string, unknown>>> | undefined)
-        ?.payment?.entity as Record<string, unknown> | undefined) ?? parsed;
+    // A QR credit carries both entities: the payment that arrived and the QR it
+    // was scanned from. The QR is what ties it back to a booking. Razorpay nests
+    // them; the stub sends flat, so both shapes are accepted until real events
+    // are available to pin it against.
+    const payload = parsed.payload as
+      | Record<string, Record<string, Record<string, unknown>>>
+      | undefined;
+    const payment = (payload?.payment?.entity as Record<string, unknown> | undefined) ?? parsed;
+    const qr = (payload?.qr_code?.entity as Record<string, unknown> | undefined) ?? parsed;
     event = {
-      orderId: entity.order_id as string | undefined,
-      paymentId: entity.id as string | undefined,
-      status: entity.status as string | undefined,
+      qrId: (qr.id ?? payment.qr_code_id) as string | undefined,
+      paymentId: payment.id as string | undefined,
+      status: payment.status as string | undefined,
       // Razorpay reports amounts in paise, the same unit we store.
-      amountPaise: typeof entity.amount === 'number' ? entity.amount : undefined,
+      amountPaise: typeof payment.amount === 'number' ? payment.amount : undefined,
     };
   } catch (err) {
     console.error(`[payments] unparseable webhook body: ${safeError(err)}`);
     throw AppError.badRequest('Malformed webhook body');
   }
 
-  if (!event.orderId || !event.paymentId) {
-    throw AppError.badRequest('Webhook is missing the order or payment id');
+  if (!event.qrId || !event.paymentId) {
+    throw AppError.badRequest('Webhook is missing the QR or payment id');
   }
   // Only a captured payment settles a booking. An 'authorized' event means the
   // money is held, not taken.
@@ -216,12 +204,12 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
   const [booking] = await db
     .select({ id: bookings.id, totalFarePaise: bookings.totalFarePaise })
     .from(bookings)
-    .where(eq(bookings.paymentOrderId, event.orderId))
+    .where(eq(bookings.paymentOrderId, event.qrId))
     .limit(1);
 
-  // Acknowledge unknown orders rather than erroring: a 4xx makes the gateway
-  // retry an event we will never recognise.
-  if (!booking) return { handled: false, reason: 'no booking for that order' };
+  // Acknowledge unknown QRs rather than erroring: a 4xx makes the gateway retry
+  // an event we will never recognise.
+  if (!booking) return { handled: false, reason: 'no booking for that QR' };
 
   // Reconcile against the frozen fare. A signature proves the gateway sent the
   // event, not that the right amount arrived - so without this a part payment
