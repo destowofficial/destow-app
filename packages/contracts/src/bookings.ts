@@ -84,6 +84,13 @@ export interface CustomerBooking {
   distanceSubmittedAt: string | null;
   // Set when the customer approves that distance. Nothing is charged before it.
   distanceConfirmedAt: string | null;
+  // --- Cancellation outcome, null until a trip is called off ----------------
+  cancelledAt: string | null;
+  cancelledBy: string | null;
+  // What was retained and what went back, frozen at cancellation so a later
+  // policy change never rewrites a settled trip.
+  cancellationFeePaise: number | null;
+  refundPaise: number | null;
   vehicleTypeName: string;
   modelName: string | null;
   registrationNo: string | null;
@@ -92,6 +99,33 @@ export interface CustomerBooking {
   driverName: string | null;
   driverPhone: string | null;
   createdAt: string;
+}
+
+// What cancelling right now would cost this customer. Computed per booking
+// rather than exposed as a global policy: the answer depends on this trip's
+// pickup time and its own fare, and a screen that has to derive the number from
+// a policy will derive it differently from the server sooner or later.
+//
+// Under postpaid billing nothing has been paid when a trip is called off, so the
+// fee is a charge rather than a deduction from a refund. Saying which of the two
+// is happening is the whole point of showing this before they commit.
+export interface CancellationPreview {
+  bookingId: string;
+  // False once the trip is running or finished - the API refuses it, and the
+  // screen should not offer a button that cannot work.
+  cancellable: boolean;
+  isFree: boolean;
+  // When free cancellation closes for this trip. Already past if isFree is false.
+  freeUntil: string;
+  freeHours: number;
+  feeBps: number;
+  cancellationFeePaise: number;
+  cancellationFeeDisplay: string;
+  // Zero in the normal postpaid case, because nothing was taken. Non-zero only
+  // where a payment was captured out of band and has to come back.
+  refundPaise: number;
+  refundDisplay: string;
+  alreadyPaid: boolean;
 }
 
 export interface Paginated<T> {

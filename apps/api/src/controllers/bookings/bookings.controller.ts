@@ -11,6 +11,7 @@ import {
   listMyBookings,
   cancelMyBooking,
   confirmTripDistance,
+  previewCancellation,
 } from '../../services/bookings/bookings.service.js';
 import {
   startPayment,
@@ -77,4 +78,11 @@ export async function getRatingController(req: Request, res: Response) {
 // distance from the client here would let them name their own price.
 export async function confirmDistanceController(req: Request, res: Response) {
   ok(res, { booking: await confirmTripDistance(callerId(req), uuidParam(req.params.id)) });
+}
+
+// Read-only: what cancelling would cost right now. Separate from the cancel
+// endpoint on purpose, so the screen can show the number without the customer
+// having committed to anything by asking.
+export async function cancellationPreviewController(req: Request, res: Response) {
+  ok(res, { cancellation: await previewCancellation(callerId(req), uuidParam(req.params.id)) });
 }

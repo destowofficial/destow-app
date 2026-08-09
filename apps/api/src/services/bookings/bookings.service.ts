@@ -1,5 +1,6 @@
-import { and, count, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, lt, ne } from 'drizzle-orm';
 import type {
+  CancellationPreview,
   CreateBookingBody,
   CustomerBooking,
   ListBookingsQuery,
@@ -14,9 +15,10 @@ import {
   serviceProviders,
 } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
-import { assertTransition } from '../../lib/bookings/lifecycle.js';
+import { assertTransition, canTransition } from '../../lib/bookings/lifecycle.js';
 import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
+import { chargeCustomer } from './mandates.service.js';
 import { safeError } from '../../lib/log/safe.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
@@ -69,6 +71,10 @@ function toCustomerBooking(r: Row): CustomerBooking {
     actualDistanceM: r.booking.actualDistanceM,
     distanceSubmittedAt: r.booking.distanceSubmittedAt?.toISOString() ?? null,
     distanceConfirmedAt: r.booking.distanceConfirmedAt?.toISOString() ?? null,
+    cancelledAt: r.booking.cancelledAt?.toISOString() ?? null,
+    cancelledBy: r.booking.cancelledBy,
+    cancellationFeePaise: r.booking.cancellationFeePaise,
+    refundPaise: r.booking.refundPaise,
     vehicleTypeName: r.type.name,
     modelName: r.vehicle.modelName,
     registrationNo: r.vehicle.registrationNo,
@@ -344,6 +350,32 @@ async function recordCancellationFee(booking: typeof bookings.$inferSelect): Pro
       refundedAt: new Date(),
     })
     .where(eq(bookings.id, booking.id));
+
+  if (breakdown.cancellationFeePaise === 0) return;
+
+  // The fee is a charge, not a deduction, because nothing was ever taken. It is
+  // recorded above first, so a gateway failure leaves it owed rather than lost.
+  const outcome = await chargeCustomer({
+    userId: booking.customerUserId,
+    bookingId: booking.id,
+    amountPaise: breakdown.cancellationFeePaise,
+  });
+
+  if (outcome.charged) {
+    await db
+      .update(bookings)
+      .set({
+        paymentStatus: 'paid',
+        paymentMethod: 'upi',
+        transactionRef: outcome.paymentId,
+        paidAt: new Date(),
+      })
+      .where(eq(bookings.id, booking.id));
+  } else {
+    console.error(
+      `[payments] cancellation fee for booking ${booking.id} not collected: ${outcome.reason}`,
+    );
+  }
 }
 
 // Return the fare, minus whatever the policy retains for the partner. Called
@@ -418,7 +450,7 @@ export async function confirmTripDistance(
   });
 
   // Claimed with distance_confirmed_at IS NULL in the WHERE, so two concurrent
-  // confirmations cannot both rewrite the fare.
+  // confirmations cannot both rewrite the fare - and, below, cannot both charge.
   const [updated] = await db
     .update(bookings)
     .set({
@@ -429,7 +461,94 @@ export async function confirmTripDistance(
     })
     .where(and(eq(bookings.id, bookingId), isNull(bookings.distanceConfirmedAt)))
     .returning({ id: bookings.id });
+  // Lost the race: the other caller is charging. Return what it settled on
+  // rather than charging a second time.
   if (!updated) return getMyBooking(customerUserId, bookingId);
 
+  // Approving the distance is the customer agreeing the amount, so this is the
+  // moment to take it. Claiming the confirmation first means the charge runs
+  // exactly once - charging before claiming would let a double tap pay twice.
+  const outcome = await chargeCustomer({
+    userId: customerUserId,
+    bookingId,
+    amountPaise: fare.totalFarePaise,
+  });
+
+  if (outcome.charged) {
+    await db
+      .update(bookings)
+      .set({
+        paymentStatus: 'paid',
+        paymentMethod: 'upi',
+        transactionRef: outcome.paymentId,
+        paidAt: new Date(),
+      })
+      .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
+  } else {
+    // The trip happened and the distance is agreed, so the money is owed either
+    // way. Left unpaid and visible rather than rolled back - a customer with no
+    // payment method must not get a free trip by never adding one.
+    console.error(
+      `[payments] booking ${bookingId} confirmed but not charged: ${outcome.reason}`,
+    );
+  }
+
   return getMyBooking(customerUserId, bookingId);
+}
+
+// What cancelling right now would cost, so the customer sees the number before
+// they commit to it rather than discovering it afterwards.
+//
+// The policy lives in platform_settings and was previously readable only from
+// inside the refund routine, which meant the app could not state the fee at the
+// moment it mattered. A customer who cancels and only then learns a quarter of
+// the fare is owed reads that as a trick, however clearly it is written in the
+// terms.
+export async function previewCancellation(
+  customerUserId: string,
+  bookingId: string,
+): Promise<CancellationPreview> {
+  const [booking] = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
+    .limit(1);
+  if (!booking) throw AppError.notFound('Booking not found');
+
+  const [settings] = await db
+    .select({
+      freeHours: platformSettings.cancellationFreeHours,
+      feeBps: platformSettings.cancellationFeeBps,
+    })
+    .from(platformSettings)
+    .limit(1);
+  const freeHours = settings?.freeHours ?? 24;
+  const feeBps = settings?.feeBps ?? 2500;
+
+  const breakdown = computeRefund({
+    totalFarePaise: booking.totalFarePaise,
+    pickupAt: booking.pickupDatetime,
+    cancelledAt: new Date(),
+    policy: { freeHours, feeBps },
+  });
+
+  const alreadyPaid = booking.paymentStatus === 'paid';
+
+  return {
+    bookingId: booking.id,
+    // The lifecycle is the authority on this, not the screen: once the vehicle
+    // is on the road with them in it, cancelling is a refund conversation.
+    cancellable: canTransition(booking.status, 'cancelled'),
+    isFree: breakdown.withinFreeWindow,
+    freeUntil: new Date(booking.pickupDatetime.getTime() - freeHours * 3_600_000).toISOString(),
+    freeHours,
+    feeBps,
+    cancellationFeePaise: breakdown.cancellationFeePaise,
+    cancellationFeeDisplay: formatPaise(breakdown.cancellationFeePaise),
+    // Nothing was taken under postpaid, so nothing goes back - the fee is a
+    // charge. A refund figure only means anything if money is actually in hand.
+    refundPaise: alreadyPaid ? breakdown.refundPaise : 0,
+    refundDisplay: formatPaise(alreadyPaid ? breakdown.refundPaise : 0),
+    alreadyPaid,
+  };
 }

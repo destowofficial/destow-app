@@ -4,13 +4,13 @@
 import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
 import { eq, sql, and, desc, notInArray } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
-import { createBookingBody, submitOdometerBody } from '@destow/contracts';
+import { createBookingBody, submitOdometerBody, MANDATE_MAX_AMOUNT_PAISE } from '@destow/contracts';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes, bookings, serviceProviders, cities, otps, authEvents,
+  vehicles, vehicleTypes, bookings, serviceProviders, cities, otps, authEvents, paymentMethods,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -42,7 +42,15 @@ import {
   listMyBookings,
   cancelMyBooking,
   confirmTripDistance,
+  previewCancellation,
 } from '@/services/bookings/bookings.service.js';
+import {
+  setupMandate,
+  confirmMandate,
+  listMyPaymentMethods,
+  revokeMandate,
+  chargeCustomer,
+} from '@/services/bookings/mandates.service.js';
 import {
   startPayment,
   confirmPayment,
@@ -52,6 +60,7 @@ import {
   stubSignature,
   stubWebhookSignature,
   stubWebhookBody,
+  stubMandateSignature,
   payments,
 } from '@/lib/adapters/payments.js';
 import {
@@ -2084,9 +2093,10 @@ test('the popular routes ranking is served from cache until invalidated', async 
   const countOf = (rs: Awaited<ReturnType<typeof listPopularRoutes>>) =>
     rs.find((r) => r.from === 'Surat' && r.to === 'Daman')?.bookings ?? 0;
 
+  const pickup = new Date(Date.now() + 2800 * 3600 * 1000);
   await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Surat', to: 'Daman',
-    pickupDatetime: new Date(Date.now() + 2800 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   // A new booking does not move the ranking while the cached list is live -
@@ -2441,4 +2451,298 @@ test('a webhook for a cancelled booking does not settle it', async () => {
   const row = await rowFor(booking.id);
   expect(row.paymentStatus).toBe('pending');
   expect(row.paidAt).toBeNull();
+});
+
+// --- The cancellation fee, shown before they commit --------------------------
+// The policy lived in platform_settings and was readable only from inside the
+// refund routine, so the app could not state the fee at the moment it mattered.
+// A customer who cancels and only then learns a quarter of the fare is owed
+// reads that as a trick, however clearly it is written in the terms.
+
+test('a trip well before pickup previews as free to cancel', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(72);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.cancellable).toBe(true);
+  expect(preview.isFree).toBe(true);
+  expect(preview.cancellationFeePaise).toBe(0);
+  expect(preview.alreadyPaid).toBe(false);
+  // Free until 24 hours before pickup, by the seeded policy.
+  expect(new Date(preview.freeUntil).getTime()).toBe(pickup.getTime() - 24 * 3_600_000);
+});
+
+test('a trip inside the window previews the fee it will actually charge', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.isFree).toBe(false);
+  expect(preview.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(preview.cancellationFeeDisplay).toMatch(/^₹/);
+  // Nothing was taken, so nothing goes back - the fee is a charge.
+  expect(preview.refundPaise).toBe(0);
+
+  // The preview and the charge must be the same number, or the preview is worse
+  // than not showing one.
+  await cancelMyBooking(customer.id, booking.id);
+  const row = await rowFor(booking.id);
+  expect(row.cancellationFeePaise).toBe(preview.cancellationFeePaise);
+});
+
+// Once the vehicle is on the road with them in it, cancelling is a refund
+// conversation. The screen should not offer a button that cannot work.
+test('a running trip previews as not cancellable', async () => {
+  const { customer, booking } = await drivenTrip();
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.cancellable).toBe(false);
+});
+
+test('someone else cannot see what your cancellation would cost', async () => {
+  const customer = await createUser();
+  const stranger = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(50);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+  await expectReject(previewCancellation(stranger.id, booking.id), 404);
+});
+
+// The trips list has to show what a cancelled trip actually cost, which means
+// the outcome has to survive onto the customer's view of it.
+test('a cancelled booking carries its settled outcome', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const cancelled = await cancelMyBooking(customer.id, booking.id);
+  expect(cancelled.cancelledAt).not.toBeNull();
+  expect(cancelled.cancelledBy).toBe('customer');
+  expect(cancelled.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(cancelled.refundPaise).toBe(0);
+});
+
+// --- Payment mandates: what makes billing after the fact collectable ---------
+// Destow charges once the trip is over and the customer has agreed the
+// odometer. Without standing permission that model has no ending - a customer
+// can confirm the distance and never pay, and a cancellation fee is a number we
+// write down and can never collect.
+
+async function activeMandateFor(userId: string, label = 'ananya@okhdfc') {
+  const setup = await setupMandate(userId, { method: 'upi' });
+  return confirmMandate(userId, {
+    mandateId: setup.mandateId,
+    orderId: setup.orderId,
+    paymentId: 'pay_auth_stub',
+    signature: stubMandateSignature(setup.orderId, 'pay_auth_stub'),
+    token: `token_${userId.slice(0, 8)}`,
+    label,
+  });
+}
+
+test('setting up a mandate takes no money and is not chargeable yet', async () => {
+  const customer = await createUser();
+  const setup = await setupMandate(customer.id, { method: 'upi' });
+
+  expect(setup.orderId).toMatch(/^order_mand_/);
+  expect(setup.maxAmountPaise).toBeGreaterThan(0);
+
+  const [row] = await db
+    .select()
+    .from(paymentMethods)
+    .where(eq(paymentMethods.id, setup.mandateId));
+  expect(row.status).toBe('pending');
+  expect(row.token).toBeNull();
+
+  // Pending is not chargeable, so nothing can be taken against it.
+  const outcome = await chargeCustomer({
+    userId: customer.id, bookingId: setup.mandateId, amountPaise: 1000,
+  });
+  expect(outcome.charged).toBe(false);
+  expect(outcome.reason).toMatch(/no active payment method/);
+});
+
+// Without verifying the signature a client could hand us any string and we
+// would charge against it later, with nobody watching.
+test('a mandate with a forged signature is refused', async () => {
+  const customer = await createUser();
+  const setup = await setupMandate(customer.id, { method: 'upi' });
+
+  await expectReject(
+    confirmMandate(customer.id, {
+      mandateId: setup.mandateId,
+      orderId: setup.orderId,
+      paymentId: 'pay_auth_stub',
+      signature: 'deadbeef',
+      token: 'token_attacker',
+    }),
+    400,
+  );
+
+  const [row] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, setup.mandateId));
+  expect(row.status).toBe('pending');
+  expect(row.token).toBeNull();
+});
+
+test('approving a mandate activates it and never returns the token', async () => {
+  const customer = await createUser();
+  const method = await activeMandateFor(customer.id);
+
+  expect(method.status).toBe('active');
+  expect(method.label).toBe('ananya@okhdfc');
+  expect(method.isDefault).toBe(true);
+  // The token authorises charges; it has no business leaving the server.
+  expect(JSON.stringify(method)).not.toMatch(/token_/);
+});
+
+// Charging happens automatically with nobody watching, so "which method did it
+// use" has to have exactly one answer.
+test('approving a second mandate retires the first', async () => {
+  const customer = await createUser();
+  const first = await activeMandateFor(customer.id, 'first@okhdfc');
+  const second = await activeMandateFor(customer.id, 'second@okaxis');
+
+  expect(second.status).toBe('active');
+  const [old] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, first.id));
+  expect(old.status).toBe('revoked');
+
+  const active = await db
+    .select()
+    .from(paymentMethods)
+    .where(and(eq(paymentMethods.userId, customer.id), eq(paymentMethods.status, 'active')));
+  expect(active).toHaveLength(1);
+});
+
+test('confirming the same mandate twice does not activate a second one', async () => {
+  const customer = await createUser();
+  const setup = await setupMandate(customer.id, { method: 'upi' });
+  const body = {
+    mandateId: setup.mandateId,
+    orderId: setup.orderId,
+    paymentId: 'pay_auth_stub',
+    signature: stubMandateSignature(setup.orderId, 'pay_auth_stub'),
+    token: 'token_repeat',
+  };
+  const a = await confirmMandate(customer.id, body);
+  const b = await confirmMandate(customer.id, body);
+  expect(b.id).toBe(a.id);
+  expect(b.status).toBe('active');
+});
+
+test('a revoked mandate cannot be charged', async () => {
+  const customer = await createUser();
+  const method = await activeMandateFor(customer.id);
+  await revokeMandate(customer.id, method.id);
+
+  const outcome = await chargeCustomer({
+    userId: customer.id, bookingId: method.id, amountPaise: 5000,
+  });
+  expect(outcome.charged).toBe(false);
+});
+
+// The gateway refuses anything above the ceiling the customer agreed to, so
+// catching it here turns a hard failure into a clear one.
+test('a charge above the agreed ceiling is refused rather than attempted', async () => {
+  const customer = await createUser();
+  await activeMandateFor(customer.id);
+
+  const outcome = await chargeCustomer({
+    userId: customer.id, bookingId: 'over-cap', amountPaise: MANDATE_MAX_AMOUNT_PAISE + 1,
+  });
+  expect(outcome.charged).toBe(false);
+  expect(outcome.reason).toMatch(/exceeds the agreed limit/);
+});
+
+// The whole point: confirming the distance is the customer agreeing the amount,
+// so that is the moment it is taken.
+test('confirming the distance charges the mandate for the metered fare', async () => {
+  const { customer, owner, booking } = await drivenTrip(1800);
+  await activeMandateFor(customer.id);
+  const actualKm = Math.round(booking.distanceM / 1000) + 90;
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 30_000, odometerEndKm: 30_000 + actualKm,
+  });
+
+  const confirmed = await confirmTripDistance(customer.id, booking.id);
+
+  expect(confirmed.paymentStatus).toBe('paid');
+  expect(confirmed.totalFarePaise).toBe(1800 * actualKm);
+  const row = await rowFor(booking.id);
+  expect(row.transactionRef).toMatch(/^pay_auto_/);
+  expect(row.paidAt).not.toBeNull();
+});
+
+// A customer with no payment method must not get a free trip by never adding
+// one. The trip happened and the distance is agreed, so the money is owed.
+test('confirming with no payment method leaves the fare owed, not waived', async () => {
+  const { customer, owner, booking } = await drivenTrip();
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 60_000, odometerEndKm: 60_000 + Math.round(booking.distanceM / 1000),
+  });
+
+  const confirmed = await confirmTripDistance(customer.id, booking.id);
+  expect(confirmed.paymentStatus).toBe('pending');
+  expect(confirmed.distanceConfirmedAt).not.toBeNull();
+  expect(confirmed.totalFarePaise).toBeGreaterThan(0);
+});
+
+test('cancelling late collects the fee from the mandate', async () => {
+  const customer = await createUser();
+  await activeMandateFor(customer.id);
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  await cancelMyBooking(customer.id, booking.id);
+
+  const row = await rowFor(booking.id);
+  expect(row.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(row.paymentStatus).toBe('paid');
+  expect(row.transactionRef).toMatch(/^pay_auto_/);
+});
+
+test('a free cancellation charges nothing', async () => {
+  const customer = await createUser();
+  await activeMandateFor(customer.id);
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(96);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  await cancelMyBooking(customer.id, booking.id);
+
+  const row = await rowFor(booking.id);
+  expect(row.cancellationFeePaise).toBe(0);
+  expect(row.paymentStatus).toBe('pending');
+});
+
+test('you cannot revoke or see somebody else"s payment method', async () => {
+  const owner = await createUser();
+  const stranger = await createUser();
+  const method = await activeMandateFor(owner.id);
+
+  await expectReject(revokeMandate(stranger.id, method.id), 404);
+  expect(await listMyPaymentMethods(stranger.id)).toHaveLength(0);
+  expect(await listMyPaymentMethods(owner.id)).toHaveLength(1);
 });
