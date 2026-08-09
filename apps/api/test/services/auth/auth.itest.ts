@@ -43,7 +43,12 @@ import {
   confirmPayment,
   handlePaymentWebhook,
 } from '@/services/bookings/payments.service.js';
-import { stubSignature, stubWebhookSignature, payments } from '@/lib/adapters/payments.js';
+import {
+  stubSignature,
+  stubWebhookSignature,
+  stubWebhookBody,
+  payments,
+} from '@/lib/adapters/payments.js';
 import {
   listProviderBookings,
   acceptBooking,
@@ -1947,4 +1952,46 @@ test('cancelled trips do not count as demand', async () => {
 
   const routes = await listPopularRoutes();
   expect(routes.find((r) => r.from === 'Kolkata' && r.to === 'Digha')).toBeUndefined();
+});
+
+// --- Payment amount reconciliation (#47) --------------------------------------
+// A signature proves the gateway sent the event, not that the right amount
+// arrived. Without reconciling, a part payment settles the booking in full and
+// the trip runs for less than it was sold for.
+
+test('a webhook paying the exact fare settles the booking', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const body = stubWebhookBody({
+    orderId, paymentId: 'pay_exact', amountPaise: booking.totalFarePaise,
+  });
+
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(true);
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('paid');
+});
+
+test('a short payment does not settle the booking', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  // A correctly signed event, for one rupee.
+  const body = stubWebhookBody({ orderId, paymentId: 'pay_short', amountPaise: 100 });
+
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+  expect(result.reason).toMatch(/amount/i);
+  // Left unpaid for a human to resolve, not rounded away.
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
+});
+
+test('an overpayment is flagged rather than accepted', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const body = stubWebhookBody({
+    orderId, paymentId: 'pay_over', amountPaise: booking.totalFarePaise + 5000,
+  });
+
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
 });
