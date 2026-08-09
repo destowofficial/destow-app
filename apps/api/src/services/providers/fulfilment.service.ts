@@ -213,16 +213,29 @@ export interface ProviderEarnings {
   grossDisplay: string;
   commissionDisplay: string;
   netPayoutDisplay: string;
+  // --- Split by who actually holds the money ---------------------------------
+  // Two settlement directions, and lumping them together tells a partner that
+  // money is coming when it is not. On a UPI trip Destow collects the fare and
+  // owes the partner the payout. On a cash trip the driver collects the whole
+  // fare at the roadside, so Destow owes nothing and the partner owes Destow the
+  // commission on it.
+  onlineTrips: number;
+  onlinePayoutDuePaise: number;
+  onlinePayoutDueDisplay: string;
+  cashTrips: number;
+  cashCommissionDuePaise: number;
+  cashCommissionDueDisplay: string;
+  // Payable minus receivable. Positive: Destow owes the partner. Negative: the
+  // partner owes Destow.
+  netPositionPaise: number;
+  netPositionDisplay: string;
 }
 
-// Earnings are derived from completed bookings rather than a separate ledger:
-// the booking row already holds the frozen gross, commission and payout, so a
-// ledger would duplicate it. A ledger earns its place when payouts start and
-// something has to record what has been settled.
 export async function getEarnings(userId: string): Promise<ProviderEarnings> {
   const providerId = await ownProviderId(userId);
-  const [row] = await db
+  const rows = await db
     .select({
+      method: bookings.paymentMethod,
       trips: count(),
       gross: sum(bookings.totalFarePaise),
       commission: sum(bookings.commissionPaise),
@@ -233,25 +246,52 @@ export async function getEarnings(userId: string): Promise<ProviderEarnings> {
       and(
         eq(bookings.serviceProviderId, providerId),
         eq(bookings.status, 'completed'),
-        // A completed trip nobody paid for is not earnings. Counting it would
-        // show a partner money that is owed by a customer, not by Destow, and
-        // would overstate commission on the platform's side too.
+        // A completed trip nobody settled is not earnings. Counting it would
+        // show a partner money that is owed by a customer, not by Destow.
         eq(bookings.paymentStatus, 'paid'),
       ),
-    );
+    )
+    .groupBy(bookings.paymentMethod);
 
   // sum() returns null over an empty set and a string for bigint totals.
-  const gross = Number(row?.gross ?? 0);
-  const commission = Number(row?.commission ?? 0);
-  const net = Number(row?.net ?? 0);
+  const n = (v: unknown) => Number(v ?? 0);
+  let trips = 0, gross = 0, commission = 0, net = 0;
+  let onlineTrips = 0, onlinePayoutDue = 0;
+  let cashTrips = 0, cashCommissionDue = 0;
+
+  for (const r of rows) {
+    trips += r.trips;
+    gross += n(r.gross);
+    commission += n(r.commission);
+    net += n(r.net);
+    if (r.method === 'cash') {
+      cashTrips += r.trips;
+      // The partner already has the fare. What is outstanding is our cut of it.
+      cashCommissionDue += n(r.commission);
+    } else {
+      onlineTrips += r.trips;
+      onlinePayoutDue += n(r.net);
+    }
+  }
+
+  const netPosition = onlinePayoutDue - cashCommissionDue;
 
   return {
-    completedTrips: row?.trips ?? 0,
+    completedTrips: trips,
     grossPaise: gross,
     commissionPaise: commission,
     netPayoutPaise: net,
     grossDisplay: formatPaise(gross),
     commissionDisplay: formatPaise(commission),
     netPayoutDisplay: formatPaise(net),
+    onlineTrips,
+    onlinePayoutDuePaise: onlinePayoutDue,
+    onlinePayoutDueDisplay: formatPaise(onlinePayoutDue),
+    cashTrips,
+    cashCommissionDuePaise: cashCommissionDue,
+    cashCommissionDueDisplay: formatPaise(cashCommissionDue),
+    netPositionPaise: netPosition,
+    netPositionDisplay: formatPaise(Math.abs(netPosition)),
   };
 }
+
