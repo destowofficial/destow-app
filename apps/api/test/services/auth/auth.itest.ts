@@ -26,6 +26,8 @@ import {
   setAdminPassword,
   updateOtpSettings,
   setVehicleStatus,
+  listProviders,
+  listVehiclesForReview,
 } from '@/services/admin/admin.service.js';
 import {
   searchRoute,
@@ -2071,4 +2073,31 @@ test('the reset is recorded against the admin who made it', async () => {
     .orderBy(desc(authEvents.createdAt));
   expect(events.length).toBeGreaterThanOrEqual(1);
   expect((events[0].meta as { byUserId?: string }).byUserId).toBe(actor.id);
+});
+
+// --- Admin listings are paginated (#49) ---------------------------------------
+// Both join owner contact details and grow with the marketplace, so unbounded
+// means slower results and more personal data with every partner who onboards.
+
+test('the admin provider list paginates and clamps the page size', async () => {
+  const owner = await createUser();
+  await registerProvider(owner.id, AGENCY, ctx);
+
+  const page = await listProviders(undefined, 1, 1);
+  expect(page.items.length).toBeLessThanOrEqual(1);
+  expect(page.limit).toBe(1);
+  expect(page.total).toBeGreaterThanOrEqual(1);
+
+  const clamped = await listProviders(undefined, 1, 9999);
+  expect(clamped.limit).toBeLessThanOrEqual(50);
+});
+
+test('the admin vehicle review queue paginates', async () => {
+  const { owner, type } = await partnerWithType();
+  await createVehicle(owner.id, { vehicleTypeId: type.id, pricePerKmPaise: 1200 });
+
+  const page = await listVehiclesForReview('pending', 1, 1);
+  expect(page.items.length).toBeLessThanOrEqual(1);
+  expect(page.total).toBeGreaterThanOrEqual(1);
+  expect(page.page).toBe(1);
 });

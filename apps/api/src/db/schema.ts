@@ -268,6 +268,11 @@ export const bookings = pgTable(
     index('bookings_vehicle_idx').on(t.vehicleId),
     index('bookings_status_idx').on(t.status),
     index('bookings_payment_status_idx').on(t.paymentStatus),
+    // Both are foreign keys that get joined on every booking read and are
+    // scanned when a vehicle type or driver is updated or removed. Postgres
+    // indexes the primary key side automatically, never the referencing side.
+    index('bookings_vehicle_type_idx').on(t.vehicleTypeId),
+    index('bookings_driver_idx').on(t.driverId),
     uniqueIndex('bookings_payment_order_uidx').on(t.paymentOrderId),
   ],
 );

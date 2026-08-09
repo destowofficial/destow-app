@@ -27,6 +27,14 @@ import { ok } from '../../lib/http/response.js';
 import { AppError } from '../../lib/http/errors.js';
 import type { SessionContext } from '../../services/auth/session.service.js';
 
+// Page params are read the same way on every admin listing; the service clamps
+// them, so anything unparseable simply falls back to the default page.
+function pageParams(req: Request) {
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 20;
+  return { page, limit };
+}
+
 function contextOf(req: Request): SessionContext {
   return { ip: req.ip, userAgent: req.headers['user-agent'], platform: 'web' };
 }
@@ -63,7 +71,8 @@ export async function listProvidersController(req: Request, res: Response) {
   if (raw !== undefined && !(PROVIDER_STATUS as readonly string[]).includes(String(raw))) {
     throw AppError.badRequest(`status must be one of: ${PROVIDER_STATUS.join(', ')}`);
   }
-  ok(res, { providers: await listProviders(raw as ProviderStatus | undefined) });
+  const { page, limit } = pageParams(req);
+  ok(res, await listProviders(raw as ProviderStatus | undefined, page, limit));
 }
 
 export async function setProviderStatusController(req: Request, res: Response) {
@@ -81,7 +90,8 @@ export async function listVehiclesForReviewController(req: Request, res: Respons
   if (raw !== undefined && !(VEHICLE_STATUS as readonly string[]).includes(String(raw))) {
     throw AppError.badRequest(`status must be one of: ${VEHICLE_STATUS.join(', ')}`);
   }
-  ok(res, { vehicles: await listVehiclesForReview(raw as VehicleStatus | undefined) });
+  const { page, limit } = pageParams(req);
+  ok(res, await listVehiclesForReview(raw as VehicleStatus | undefined, page, limit));
 }
 
 export async function setVehicleStatusController(req: Request, res: Response) {
