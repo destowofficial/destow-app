@@ -43,5 +43,14 @@ export type PaymentStatus = (typeof PAYMENT_STATUS)[number];
 export const PAYMENT_METHOD = ['upi', 'card', 'cash', 'netbanking'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHOD)[number];
 
+// A mandate is the customer's standing permission to be charged after a trip.
+// pending  - authorisation opened, the customer has not approved it yet
+// active   - approved and chargeable
+// revoked  - the customer withdrew it, or we replaced it with a newer one
+// expired  - past the date the customer agreed to
+const MANDATE_STATUS = ['pending', 'active', 'revoked', 'expired'] as const;
+export { MANDATE_STATUS };
+export type MandateStatus = (typeof MANDATE_STATUS)[number];
+
 export const TRIP_TYPE = ['one_way', 'round_trip'] as const;
 export type TripType = (typeof TRIP_TYPE)[number];

@@ -33,6 +33,27 @@ export interface RefundResult {
   amountPaise: number;
 }
 
+// A mandate is standing permission to charge after a trip. Setting one up takes
+// no money: the customer authorises a ceiling, and what comes back is a token.
+export interface MandateAuthorisation {
+  // The order the client opens the authorisation sheet against.
+  orderId: string;
+  keyId: string;
+  // The gateway's handle for this customer, needed to charge later.
+  customerRef: string;
+}
+
+export interface MandateSignature {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}
+
+export interface MandateCharge {
+  paymentId: string;
+  amountPaise: number;
+}
+
 export interface PaymentProvider {
   readonly name: string;
   createOrder(input: { bookingId: string; amountPaise: number }): Promise<PaymentOrder>;
@@ -45,6 +66,26 @@ export interface PaymentProvider {
   // paid, which is the money equivalent of sending your own fare.
   verifyPayment(sig: PaymentSignature): boolean;
   verifyWebhook(rawBody: string, signature: string): boolean;
+
+  // --- Mandates ------------------------------------------------------------
+  // Open an authorisation for a standing permission to charge. Takes no money.
+  authoriseMandate(input: {
+    userId: string;
+    maxAmountPaise: number;
+    method: 'upi' | 'card';
+  }): Promise<MandateAuthorisation>;
+  // Whether the customer really approved that authorisation. Same construction
+  // as verifyPayment, and the same reason: without it a client could claim an
+  // authorisation it never obtained and hand us a token of its choosing.
+  verifyMandate(sig: MandateSignature): boolean;
+  // Charge an approved mandate. This runs with nobody watching, after the trip,
+  // which is exactly why the amount is always computed server-side.
+  chargeMandate(input: {
+    token: string;
+    customerRef: string;
+    amountPaise: number;
+    bookingId: string;
+  }): Promise<MandateCharge>;
 }
 
 // Constant-time compare over hex digests of equal length. A plain === leaks,
@@ -89,6 +130,51 @@ class RazorpayProvider implements PaymentProvider {
       { provider: 'razorpay', operation: 'refund' },
       async () => {
         throw new Error('RazorpayProvider.refund not implemented - POST /v1/payments/:id/refund');
+      },
+    );
+  }
+
+  async authoriseMandate(_input: {
+    userId: string;
+    maxAmountPaise: number;
+    method: 'upi' | 'card';
+  }): Promise<MandateAuthorisation> {
+    return observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'razorpay', operation: 'authorise_mandate' },
+      async () => {
+        throw new Error(
+          'RazorpayProvider.authoriseMandate not implemented - POST /v1/customers then ' +
+            'POST /v1/orders with token.max_amount for a zero-value authorisation',
+        );
+      },
+    );
+  }
+
+  // The authorisation is signed exactly like a payment, so this is the same
+  // construction and needs no network - the security-critical half is testable
+  // long before live keys exist.
+  verifyMandate({ orderId, paymentId, signature }: MandateSignature): boolean {
+    const expected = hmacHex(env.RAZORPAY_KEY_SECRET ?? '', `${orderId}|${paymentId}`);
+    return safeEqualHex(expected, signature);
+  }
+
+  async chargeMandate(_input: {
+    token: string;
+    customerRef: string;
+    amountPaise: number;
+    bookingId: string;
+  }): Promise<MandateCharge> {
+    return observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'razorpay', operation: 'charge_mandate' },
+      async () => {
+        throw new Error(
+          'RazorpayProvider.chargeMandate not implemented - POST /v1/orders then ' +
+            'POST /v1/payments/create/recurring with the saved token',
+        );
       },
     );
   }
@@ -155,6 +241,55 @@ class StubPaymentProvider implements PaymentProvider {
   verifyWebhook(rawBody: string, signature: string): boolean {
     return safeEqualHex(hmacHex(STUB_SECRET, rawBody), signature);
   }
+
+  async authoriseMandate(input: {
+    userId: string;
+    maxAmountPaise: number;
+    method: 'upi' | 'card';
+  }): Promise<MandateAuthorisation> {
+    const auth = await observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'stub', operation: 'authorise_mandate' },
+      async () => ({
+        orderId: `order_mand_${input.userId.replace(/-/g, '').slice(0, 18)}`,
+        keyId: 'rzp_test_stub',
+        customerRef: `cust_stub_${input.userId.replace(/-/g, '').slice(0, 14)}`,
+      }),
+    );
+    recordPaymentEvent('stub', input.method, 'mandate_authorised');
+    return auth;
+  }
+
+  verifyMandate({ orderId, paymentId, signature }: MandateSignature): boolean {
+    return safeEqualHex(hmacHex(STUB_SECRET, `${orderId}|${paymentId}`), signature);
+  }
+
+  async chargeMandate(input: {
+    token: string;
+    customerRef: string;
+    amountPaise: number;
+    bookingId: string;
+  }): Promise<MandateCharge> {
+    const charge = await observeAsync(
+      externalRequestDuration,
+      externalRequestsTotal,
+      { provider: 'stub', operation: 'charge_mandate' },
+      async () => ({
+        paymentId: `pay_auto_${input.bookingId.replace(/-/g, '').slice(0, 16)}`,
+        amountPaise: input.amountPaise,
+      }),
+    );
+    recordPaymentEvent('stub', 'upi', 'mandate_charged');
+    return charge;
+  }
+}
+
+// Exposed for the same reason stubSignature is: tests and local clients need to
+// produce an approval the stub accepts, exercising the code path a real
+// gateway's signature takes rather than a shortcut around it.
+export function stubMandateSignature(orderId: string, paymentId: string): string {
+  return hmacHex(STUB_SECRET, `${orderId}|${paymentId}`);
 }
 
 // Exposed so tests (and local clients) can produce a signature the stub accepts,

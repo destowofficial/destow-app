@@ -1,4 +1,4 @@
-import { and, count, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, lt, ne } from 'drizzle-orm';
 import type {
   CancellationPreview,
   CreateBookingBody,
@@ -18,6 +18,7 @@ import { AppError } from '../../lib/http/errors.js';
 import { assertTransition, canTransition } from '../../lib/bookings/lifecycle.js';
 import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
+import { chargeCustomer } from './mandates.service.js';
 import { safeError } from '../../lib/log/safe.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
@@ -349,6 +350,32 @@ async function recordCancellationFee(booking: typeof bookings.$inferSelect): Pro
       refundedAt: new Date(),
     })
     .where(eq(bookings.id, booking.id));
+
+  if (breakdown.cancellationFeePaise === 0) return;
+
+  // The fee is a charge, not a deduction, because nothing was ever taken. It is
+  // recorded above first, so a gateway failure leaves it owed rather than lost.
+  const outcome = await chargeCustomer({
+    userId: booking.customerUserId,
+    bookingId: booking.id,
+    amountPaise: breakdown.cancellationFeePaise,
+  });
+
+  if (outcome.charged) {
+    await db
+      .update(bookings)
+      .set({
+        paymentStatus: 'paid',
+        paymentMethod: 'upi',
+        transactionRef: outcome.paymentId,
+        paidAt: new Date(),
+      })
+      .where(eq(bookings.id, booking.id));
+  } else {
+    console.error(
+      `[payments] cancellation fee for booking ${booking.id} not collected: ${outcome.reason}`,
+    );
+  }
 }
 
 // Return the fare, minus whatever the policy retains for the partner. Called
@@ -423,7 +450,7 @@ export async function confirmTripDistance(
   });
 
   // Claimed with distance_confirmed_at IS NULL in the WHERE, so two concurrent
-  // confirmations cannot both rewrite the fare.
+  // confirmations cannot both rewrite the fare - and, below, cannot both charge.
   const [updated] = await db
     .update(bookings)
     .set({
@@ -434,7 +461,37 @@ export async function confirmTripDistance(
     })
     .where(and(eq(bookings.id, bookingId), isNull(bookings.distanceConfirmedAt)))
     .returning({ id: bookings.id });
+  // Lost the race: the other caller is charging. Return what it settled on
+  // rather than charging a second time.
   if (!updated) return getMyBooking(customerUserId, bookingId);
+
+  // Approving the distance is the customer agreeing the amount, so this is the
+  // moment to take it. Claiming the confirmation first means the charge runs
+  // exactly once - charging before claiming would let a double tap pay twice.
+  const outcome = await chargeCustomer({
+    userId: customerUserId,
+    bookingId,
+    amountPaise: fare.totalFarePaise,
+  });
+
+  if (outcome.charged) {
+    await db
+      .update(bookings)
+      .set({
+        paymentStatus: 'paid',
+        paymentMethod: 'upi',
+        transactionRef: outcome.paymentId,
+        paidAt: new Date(),
+      })
+      .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
+  } else {
+    // The trip happened and the distance is agreed, so the money is owed either
+    // way. Left unpaid and visible rather than rolled back - a customer with no
+    // payment method must not get a free trip by never adding one.
+    console.error(
+      `[payments] booking ${bookingId} confirmed but not charged: ${outcome.reason}`,
+    );
+  }
 
   return getMyBooking(customerUserId, bookingId);
 }
