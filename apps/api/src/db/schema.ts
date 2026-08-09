@@ -25,7 +25,6 @@ import {
   TRIP_TYPE,
   CLIENT,
   OTP_CHANNEL,
-  MANDATE_STATUS,
 } from '@destow/contracts';
 
 // --- Enums (values are the single source of truth in @destow/contracts) -------
@@ -42,7 +41,6 @@ export const paymentMethodEnum = pgEnum('payment_method', PAYMENT_METHOD);
 export const tripTypeEnum = pgEnum('trip_type', TRIP_TYPE);
 export const clientEnum = pgEnum('client', CLIENT);
 export const otpChannelEnum = pgEnum('otp_channel', OTP_CHANNEL);
-export const mandateStatusEnum = pgEnum('mandate_status', MANDATE_STATUS);
 
 const timestamps = {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -508,49 +506,3 @@ export type City = typeof cities.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type NewCustomer = typeof customers.$inferInsert;
 
-// --- Payment mandates --------------------------------------------------------
-// Destow charges after the trip, so it needs standing permission to charge. This
-// row is that permission.
-//
-// It holds a gateway token, never card data: the token authorises charges
-// against our own account and is worthless anywhere else, which is the whole
-// reason to keep one rather than anything resembling a card number.
-export const paymentMethods = pgTable(
-  'payment_methods',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .references(() => users.id, { onDelete: 'cascade' })
-      .notNull(),
-    // Which gateway issued the token. A token is meaningless to any other one,
-    // so switching provider must not silently try to charge against it.
-    provider: text('provider').notNull(),
-    providerCustomerId: text('provider_customer_id'),
-    // Null until the customer approves the authorisation. A pending row exists
-    // so the callback has something to attach to.
-    token: text('token'),
-    method: paymentMethodEnum('method').notNull(),
-    // Masked, for display only: 'ananya@okhdfc' or 'HDFC ****4242'.
-    label: text('label'),
-    // The ceiling the customer agreed to. A charge above it is refused by the
-    // gateway, so it has to clear a long outstation trip that ran over.
-    maxAmountPaise: integer('max_amount_paise').notNull(),
-    status: mandateStatusEnum('status').notNull().default('pending'),
-    // The zero-value authorisation payment, kept for reconciliation.
-    authPaymentId: text('auth_payment_id'),
-    activatedAt: timestamp('activated_at', { withTimezone: true }),
-    revokedAt: timestamp('revoked_at', { withTimezone: true }),
-    expiresAt: timestamp('expires_at', { withTimezone: true }),
-    ...timestamps,
-  },
-  (t) => [
-    index('payment_methods_user_idx').on(t.userId, t.status),
-    // At most one active mandate per customer. Charging is automatic and
-    // happens with nobody watching, so "which card did it use" must have
-    // exactly one answer - a partial index makes the database enforce that
-    // rather than the service remembering to.
-    uniqueIndex('payment_methods_one_active_uidx')
-      .on(t.userId)
-      .where(sql`status = 'active'`),
-  ],
-);

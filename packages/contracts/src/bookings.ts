@@ -17,11 +17,6 @@ export const createBookingBody = z
     pickupDatetime: z.coerce.date(),
     tripType: z.literal('round_trip').default('round_trip'),
     returnDatetime: z.coerce.date(),
-    // How this trip gets settled once the distance is agreed. Defaults to cash
-    // because cash always works: it needs no mandate, so a booking can never
-    // fail for want of one. Choosing UPI is the upgrade, and it is checked at
-    // the moment it matters rather than here.
-    paymentMethod: z.enum(CUSTOMER_PAYMENT_METHOD).default('cash'),
   })
   .refine((b) => b.pickupDatetime.getTime() > Date.now(), {
     path: ['pickupDatetime'],
@@ -74,9 +69,9 @@ export interface CustomerBooking {
   pickupDatetime: string;
   returnDatetime: string | null;
   pricePerKmPaise: number;
-  // How this trip settles: charged to a UPI mandate once the distance is
-  // agreed, or handed to the driver at the end.
-  paymentMethod: (typeof CUSTOMER_PAYMENT_METHOD)[number];
+  // How this trip was settled. Null until it is paid: the choice is made at the
+  // end, on the payment screen, not when the trip is booked.
+  paymentMethod: (typeof CUSTOMER_PAYMENT_METHOD)[number] | null;
   // What this booking currently costs: the estimate until the distance is
   // confirmed, the recomputed figure afterwards. Payments reconcile against it.
   totalFarePaise: number;

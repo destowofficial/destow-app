@@ -4,18 +4,13 @@
 import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
 import { eq, sql, and, desc, notInArray } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
-import {
-  createBookingBody,
-  submitOdometerBody,
-  setupMandateBody,
-  MANDATE_MAX_AMOUNT_PAISE,
-} from '@destow/contracts';
+import { createBookingBody, submitOdometerBody } from '@destow/contracts';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes, bookings, serviceProviders, cities, otps, authEvents, paymentMethods,
+  vehicles, vehicleTypes, bookings, serviceProviders, cities, otps, authEvents,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -46,26 +41,17 @@ import {
   getMyBooking,
   listMyBookings,
   cancelMyBooking,
-  confirmTripDistance,
   previewCancellation,
 } from '@/services/bookings/bookings.service.js';
 import {
-  setupMandate,
-  confirmMandate,
-  listMyPaymentMethods,
-  revokeMandate,
-  chargeCustomer,
-} from '@/services/bookings/mandates.service.js';
-import {
-  startPayment,
-  confirmPayment,
+  startQrPayment,
+  paymentStatus,
   handlePaymentWebhook,
 } from '@/services/bookings/payments.service.js';
 import {
   stubSignature,
   stubWebhookSignature,
   stubWebhookBody,
-  stubMandateSignature,
   payments,
 } from '@/lib/adapters/payments.js';
 import {
@@ -74,6 +60,7 @@ import {
   assignDriver,
   startTrip,
   completeTrip,
+  confirmCashCollected,
   getEarnings,
 } from '@/services/providers/fulfilment.service.js';
 import {
@@ -902,7 +889,7 @@ test('a booking freezes the fare the server computed', async () => {
     to: 'Agra',
     pickupDatetime: TOMORROW(),
     returnDatetime: RETURN_AFTER(TOMORROW()),
-    tripType: 'round_trip', paymentMethod: 'cash',
+    tripType: 'round_trip',
   });
 
   expect(b.status).toBe('pending');
@@ -929,7 +916,7 @@ test('changing the vehicle price later does not alter an existing booking', asyn
     to: 'Agra',
     pickupDatetime: TOMORROW(),
     returnDatetime: RETURN_AFTER(TOMORROW()),
-    tripType: 'round_trip', paymentMethod: 'cash',
+    tripType: 'round_trip',
   });
   const agreed = b.totalFarePaise;
 
@@ -944,7 +931,7 @@ test('a customer never sees commission on their own booking', async () => {
   const customer = await createUser();
   const { vehicle } = await bookableVehicle(1200);
   const b = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   for (const field of ['commissionPaise', 'providerPayoutPaise', 'commissionBps']) {
     expect(b).not.toHaveProperty(field);
@@ -960,7 +947,7 @@ test('a vehicle deactivated after the quote cannot be booked', async () => {
   await updateVehicle(owner.id, vehicle.id, { isActive: false });
   await expectReject(
     createBooking(customer.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
     }),
     409,
   );
@@ -978,7 +965,7 @@ test('a pending provider vehicle cannot be booked', async () => {
     .returning();
   await expectReject(
     createBooking(customer.id, {
-      vehicleId: v.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: v.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
     }),
     409,
   );
@@ -989,7 +976,7 @@ test('a customer cannot read another customer booking', async () => {
   const bob = await createUser();
   const { vehicle } = await bookableVehicle(1000);
   const b = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   await expectReject(getMyBooking(bob.id, b.id), 404);
 });
@@ -1008,7 +995,7 @@ test('history paginates with a real total and a working status filter', async ()
       to: 'Agra',
       pickupDatetime: new Date(Date.now() + i * 7 * 24 * 3600 * 1000),
       returnDatetime: RETURN_AFTER(new Date(Date.now() + i * 7 * 24 * 3600 * 1000)),
-      tripType: 'round_trip', paymentMethod: 'cash',
+      tripType: 'round_trip',
     });
   }
 
@@ -1035,7 +1022,7 @@ async function bookedTrip(pricePerKmPaise = 1300) {
   const { owner, provider, vehicle } = await bookableVehicle(pricePerKmPaise);
   const driver = await createDriver(owner.id, { name: 'Rajesh', phone: '9876500099' });
   const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   return { customer, owner, provider, vehicle, driver, booking };
 }
@@ -1185,12 +1172,12 @@ test('the same vehicle cannot be booked for overlapping dates', async () => {
   const pickup = AT(48);
 
   await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   await expectReject(
     createBooking(bob.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -1203,12 +1190,12 @@ test('the same vehicle can be booked once the first trip is over', async () => {
   const bob = await createUser();
 
   const first = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(48), returnDatetime: RETURN_AFTER(AT(48)), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(48), returnDatetime: RETURN_AFTER(AT(48)), tripType: 'round_trip',
   });
 
   // Well clear of the first trip's drive time.
   const later = await createBooking(bob.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(24 * 14), returnDatetime: RETURN_AFTER(AT(24 * 14)), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(24 * 14), returnDatetime: RETURN_AFTER(AT(24 * 14)), tripType: 'round_trip',
   });
   expect(later.id).not.toBe(first.id);
 });
@@ -1222,11 +1209,11 @@ test('cancelling releases the vehicle for someone else', async () => {
   const pickup = AT(72);
 
   const first = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   await expectReject(
     createBooking(bob.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -1234,7 +1221,7 @@ test('cancelling releases the vehicle for someone else', async () => {
   await cancelMyBooking(alice.id, first.id);
 
   const second = await createBooking(bob.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(second.status).toBe('pending');
 });
@@ -1248,10 +1235,10 @@ test('another vehicle is unaffected by the first being held', async () => {
   const pickup = AT(96);
 
   await createBooking(alice.id, {
-    vehicleId: a.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: a.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   const other = await createBooking(bob.id, {
-    vehicleId: b.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: b.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(other.status).toBe('pending');
 });
@@ -1265,7 +1252,7 @@ test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
   const pickup = AT(120);
   const trip = {
     from: 'Delhi', to: 'Agra', pickupDatetime: pickup,
-    returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   } as const;
 
   const results = await Promise.allSettled([
@@ -1286,237 +1273,6 @@ test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
   expect(held).toHaveLength(1);
 });
 
-// --- Payments -----------------------------------------------------------------
-// The amount is the fare frozen on the booking; settling is idempotent; and a
-// payment is only real if the gateway signed it.
-
-async function payableBooking(pricePerKmPaise = 1300) {
-  const customer = await createUser();
-  const { vehicle, owner } = await bookableVehicle(pricePerKmPaise);
-  const pickup = new Date(Date.now() + 200 * 3600 * 1000);
-  // UPI with no mandate on file. Confirming the distance therefore tries to
-  // charge, fails for want of a payment method, and leaves the fare owed - which
-  // is exactly when a customer is offered a manual payment, and the only thing
-  // the gateway order path is still for now that UPI charges automatically and
-  // cash settles at the roadside.
-  const booked = await createBooking(customer.id, {
-    vehicleId: vehicle.id,
-    from: 'Delhi',
-    to: 'Agra',
-    pickupDatetime: pickup,
-    returnDatetime: RETURN_AFTER(pickup),
-    tripType: 'round_trip', paymentMethod: 'upi',
-  });
-
-  // Nothing is payable until the trip has run and the customer has agreed the
-  // odometer, so a "payable booking" now means one driven to that point. The
-  // reading is set to exactly the estimate, which keeps the amount identical to
-  // the quote and leaves these tests about payment rather than about metering.
-  const driver = await createDriver(owner.id, {
-    name: 'Rajesh',
-    phone: `98765${String(driverSeq++).padStart(5, '0')}`,
-  });
-  await acceptBooking(owner.id, booked.id);
-  await assignDriver(owner.id, booked.id, driver.id);
-  await startTrip(owner.id, booked.id);
-  await completeTrip(owner.id, booked.id, {
-    odometerStartKm: 20_000,
-    odometerEndKm: 20_000 + Math.round(booked.distanceM / 1000),
-  });
-  const booking = await confirmTripDistance(customer.id, booked.id);
-  return { customer, owner, booking };
-}
-
-// Driver phone numbers are unique, and this fixture runs on nearly every
-// payment test.
-let driverSeq = 10_000;
-
-test('the payment order is for the frozen fare, not anything the client sends', async () => {
-  const { customer, booking } = await payableBooking(1300);
-  const intent = await startPayment(customer.id, booking.id);
-  expect(intent.amountPaise).toBe(booking.totalFarePaise);
-  expect(intent.alreadyPaid).toBe(false);
-  expect(intent.orderId).toMatch(/^order_/);
-});
-
-// A customer who backs out of the checkout and taps Pay again must not
-// accumulate open orders the gateway can still settle against.
-test('starting payment twice reuses the same order', async () => {
-  const { customer, booking } = await payableBooking();
-  const first = await startPayment(customer.id, booking.id);
-  const second = await startPayment(customer.id, booking.id);
-  expect(second.orderId).toBe(first.orderId);
-});
-
-test('a valid signature settles the booking', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = 'pay_test_1';
-
-  const result = await confirmPayment(
-    customer.id,
-    booking.id,
-    { orderId, paymentId, signature: stubSignature(orderId, paymentId) },
-    'upi',
-  );
-  expect(result.paymentStatus).toBe('paid');
-
-  const after = await getMyBooking(customer.id, booking.id);
-  expect(after.paymentStatus).toBe('paid');
-});
-
-// The whole integrity of the flow. Without verification a client could simply
-// claim it paid - the money equivalent of sending your own fare.
-test('a forged signature is refused and the booking stays unpaid', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-
-  await expectReject(
-    confirmPayment(customer.id, booking.id, {
-      orderId,
-      paymentId: 'pay_forged',
-      signature: 'deadbeef'.repeat(8),
-    }),
-    400,
-  );
-
-  const after = await getMyBooking(customer.id, booking.id);
-  expect(after.paymentStatus).toBe('pending');
-});
-
-// A real ₹1 payment against another order must not settle a ₹9000 booking.
-test('a signature for a different order is refused', async () => {
-  const a = await payableBooking(1000);
-  const b = await payableBooking(2500);
-  await startPayment(a.customer.id, a.booking.id);
-  const other = await startPayment(b.customer.id, b.booking.id);
-
-  const paymentId = 'pay_cheap';
-  await expectReject(
-    confirmPayment(a.customer.id, a.booking.id, {
-      orderId: other.orderId, // the cheap booking's order
-      paymentId,
-      signature: stubSignature(other.orderId, paymentId),
-    }),
-    400,
-  );
-  expect((await getMyBooking(a.customer.id, a.booking.id)).paymentStatus).toBe('pending');
-});
-
-test('confirming twice is idempotent rather than a double charge', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = 'pay_twice';
-  const sig = stubSignature(orderId, paymentId);
-
-  const first = await confirmPayment(customer.id, booking.id, { orderId, paymentId, signature: sig });
-  const second = await confirmPayment(customer.id, booking.id, { orderId, paymentId, signature: sig });
-
-  expect(first.alreadyPaid).toBe(false);
-  expect(second.alreadyPaid).toBe(true);
-  expect(second.paymentStatus).toBe('paid');
-});
-
-test('a customer cannot pay for another customer booking', async () => {
-  const { booking } = await payableBooking();
-  const stranger = await createUser();
-  await expectReject(startPayment(stranger.id, booking.id), 404);
-});
-
-test('a cancelled booking cannot be paid', async () => {
-  const customer = await createUser();
-  const { vehicle } = await bookableVehicle(1000);
-  const pickup = AT(300);
-  const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
-  });
-  await cancelMyBooking(customer.id, booking.id);
-  await expectReject(startPayment(customer.id, booking.id), 409);
-});
-
-// The other side of the same gate: a trip that has run but whose distance the
-// customer has not agreed yet has no settled amount, so there is nothing to
-// open an order for. Charging here would take the estimate.
-test('a trip cannot be paid before the distance is confirmed', async () => {
-  const { customer, owner, booking } = await drivenTrip();
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 70_000, odometerEndKm: 70_000 + Math.round(booking.distanceM / 1000),
-  });
-  await expectReject(startPayment(customer.id, booking.id), 409);
-
-  await confirmTripDistance(customer.id, booking.id);
-  const intent = await startPayment(customer.id, booking.id);
-  expect(intent.orderId).toMatch(/^order_/);
-});
-
-// The net for a customer whose app died mid-checkout after their money moved.
-test('a signed webhook settles a booking with no customer session', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-
-  const body = JSON.stringify({
-    payload: { payment: { entity: { id: 'pay_hook', order_id: orderId, status: 'captured' } } },
-  });
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(true);
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('paid');
-});
-
-test('an unsigned webhook changes nothing', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const body = JSON.stringify({
-    payload: { payment: { entity: { id: 'pay_x', order_id: orderId, status: 'captured' } } },
-  });
-
-  await expectReject(handlePaymentWebhook(body, 'not-a-signature'), 400);
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
-});
-
-// Held is not taken.
-test('an authorized-but-not-captured webhook does not settle', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const body = JSON.stringify({
-    payload: { payment: { entity: { id: 'pay_auth', order_id: orderId, status: 'authorized' } } },
-  });
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(false);
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
-});
-
-// A 4xx would make the gateway retry an event we will never recognise.
-test('a webhook for an unknown order is acknowledged, not errored', async () => {
-  const body = JSON.stringify({
-    payload: { payment: { entity: { id: 'pay_y', order_id: 'order_unknown', status: 'captured' } } },
-  });
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(false);
-});
-
-// Client confirm and webhook can race for the same payment.
-test('confirm and webhook together settle exactly once', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = 'pay_race';
-  const body = JSON.stringify({
-    payload: { payment: { entity: { id: paymentId, order_id: orderId, status: 'captured' } } },
-  });
-
-  const [a, b] = await Promise.all([
-    confirmPayment(customer.id, booking.id, {
-      orderId, paymentId, signature: stubSignature(orderId, paymentId),
-    }),
-    handlePaymentWebhook(body, stubWebhookSignature(body)),
-  ]);
-
-  expect(a.paymentStatus).toBe('paid');
-  expect(b.handled).toBe(true);
-  // Exactly one of the two did the settling.
-  expect([a.alreadyPaid, (b as { alreadyPaid?: boolean }).alreadyPaid].filter(Boolean)).toHaveLength(1);
-});
-
 // --- Ratings ------------------------------------------------------------------
 // The search listing has always shown a provider average with nothing feeding
 // it, so every partner read as unrated forever. This is the source.
@@ -1531,7 +1287,7 @@ async function completedTrip(pricePerKmPaise = 1000) {
     to: 'Agra',
     pickupDatetime: new Date(Date.now() + 300 * 3600 * 1000),
     returnDatetime: RETURN_AFTER(new Date(Date.now() + 300 * 3600 * 1000)),
-    tripType: 'round_trip', paymentMethod: 'cash',
+    tripType: 'round_trip',
   });
   await acceptBooking(owner.id, booking.id);
   await assignDriver(owner.id, booking.id, driver.id);
@@ -1577,7 +1333,7 @@ test('only a completed trip can be rated', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 400 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 400 * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: new Date(Date.now() + 400 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 400 * 3600 * 1000)), tripType: 'round_trip',
   });
   await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
 });
@@ -1587,7 +1343,7 @@ test('a cancelled trip cannot be rated', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 500 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 500 * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: new Date(Date.now() + 500 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 500 * 3600 * 1000)), tripType: 'round_trip',
   });
   await cancelMyBooking(customer.id, booking.id);
   await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
@@ -1642,7 +1398,7 @@ test('ratings across several trips accumulate correctly', async () => {
     const customer = await createUser();
     const booking = await createBooking(customer.id, {
       vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-      pickupDatetime: new Date(Date.now() + (600 + i * 100) * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + (600 + i * 100) * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+      pickupDatetime: new Date(Date.now() + (600 + i * 100) * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + (600 + i * 100) * 3600 * 1000)), tripType: 'round_trip',
     });
     await acceptBooking(owner.id, booking.id);
     await assignDriver(owner.id, booking.id, driver.id);
@@ -1678,7 +1434,7 @@ async function paidBooking(hoursToPickup: number, pricePerKmPaise = 1000) {
     to: 'Agra',
     pickupDatetime: new Date(Date.now() + hoursToPickup * 3600 * 1000),
     returnDatetime: RETURN_AFTER(new Date(Date.now() + hoursToPickup * 3600 * 1000)),
-    tripType: 'round_trip', paymentMethod: 'cash',
+    tripType: 'round_trip',
   });
   // Settled directly rather than through startPayment. Under postpaid billing
   // nothing is payable until the trip has run and the customer has agreed the
@@ -1758,7 +1514,7 @@ test('an unpaid booking cancels with no refund recorded', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 72 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 72 * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: new Date(Date.now() + 72 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 72 * 3600 * 1000)), tripType: 'round_trip',
   });
 
   await cancelMyBooking(customer.id, booking.id);
@@ -1781,7 +1537,7 @@ test('cancelling late records a fee owed rather than a refund', async () => {
   const pickup = AT(2);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   await cancelMyBooking(customer.id, booking.id);
@@ -1843,7 +1599,7 @@ test('a round trip is charged for both legs', async () => {
     from: 'Delhi',
     to: 'Agra',
     pickupDatetime: pickup,
-    tripType: 'round_trip', paymentMethod: 'cash',
+    tripType: 'round_trip',
     returnDatetime: new Date(pickup.getTime() + 48 * 3600 * 1000),
   });
 
@@ -1862,7 +1618,7 @@ test('earnings exclude completed trips that were never paid', async () => {
   const driver = await createDriver(owner.id, { name: 'Unpaid', phone: '9876500055' });
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 1000 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 1000 * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: new Date(Date.now() + 1000 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 1000 * 3600 * 1000)), tripType: 'round_trip',
   });
   await acceptBooking(owner.id, booking.id);
   await assignDriver(owner.id, booking.id, driver.id);
@@ -1890,12 +1646,12 @@ test('a booking nobody accepted is released when someone else wants the vehicle'
   const pickup = new Date(Date.now() + 1200 * 3600 * 1000);
 
   const held = await createBooking(squatter.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   // Still fresh, so it genuinely blocks.
   await expectReject(
     createBooking(buyer.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -1907,7 +1663,7 @@ test('a booking nobody accepted is released when someone else wants the vehicle'
     .where(eq(bookings.id, held.id));
 
   const won = await createBooking(buyer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(won.status).toBe('pending');
 
@@ -1927,7 +1683,7 @@ test('an accepted booking is never released by hold expiry', async () => {
   const pickup = new Date(Date.now() + 1400 * 3600 * 1000);
 
   const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   await acceptBooking(owner.id, booking.id);
 
@@ -1940,7 +1696,7 @@ test('an accepted booking is never released by hold expiry', async () => {
 
   await expectReject(
     createBooking(other.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -2059,7 +1815,7 @@ test('popular routes reflect real bookings', async () => {
       to: 'Manali',
       pickupDatetime: new Date(Date.now() + (2000 + i * 200) * 3600 * 1000),
       returnDatetime: RETURN_AFTER(new Date(Date.now() + (2000 + i * 200) * 3600 * 1000)),
-      tripType: 'round_trip', paymentMethod: 'cash',
+      tripType: 'round_trip',
     });
   }
   // The list is cached for an hour, so without this the assertion below reads a
@@ -2078,7 +1834,7 @@ test('cancelled trips do not count as demand', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const b = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Kolkata', to: 'Digha',
-    pickupDatetime: new Date(Date.now() + 2600 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 2600 * 3600 * 1000)), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: new Date(Date.now() + 2600 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 2600 * 3600 * 1000)), tripType: 'round_trip',
   });
   await cancelMyBooking(customer.id, b.id);
 
@@ -2106,7 +1862,7 @@ test('the popular routes ranking is served from cache until invalidated', async 
   const pickup = new Date(Date.now() + 2800 * 3600 * 1000);
   await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Surat', to: 'Daman',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   // A new booking does not move the ranking while the cached list is live -
@@ -2125,48 +1881,6 @@ test('concurrent callers on a cold cache share one computation', async () => {
   // Same list object identity is not guaranteed across the cache round-trip, but
   // the values must agree - a stampede that raced would produce divergent lists.
   for (const r of results) expect(r).toEqual(results[0]);
-});
-
-// --- Payment amount reconciliation (#47) --------------------------------------
-// A signature proves the gateway sent the event, not that the right amount
-// arrived. Without reconciling, a part payment settles the booking in full and
-// the trip runs for less than it was sold for.
-
-test('a webhook paying the exact fare settles the booking', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const body = stubWebhookBody({
-    orderId, paymentId: 'pay_exact', amountPaise: booking.totalFarePaise,
-  });
-
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(true);
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('paid');
-});
-
-test('a short payment does not settle the booking', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  // A correctly signed event, for one rupee.
-  const body = stubWebhookBody({ orderId, paymentId: 'pay_short', amountPaise: 100 });
-
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(false);
-  expect(result.reason).toMatch(/amount/i);
-  // Left unpaid for a human to resolve, not rounded away.
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
-});
-
-test('an overpayment is flagged rather than accepted', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const body = stubWebhookBody({
-    orderId, paymentId: 'pay_over', amountPaise: booking.totalFarePaise + 5000,
-  });
-
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-  expect(result.handled).toBe(false);
-  expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
 });
 
 // --- Attempt cap, holds and reset (#35, #36, #50) -----------------------------
@@ -2284,188 +1998,6 @@ test('the admin vehicle review queue paginates', async () => {
   expect(page.page).toBe(1);
 });
 
-// --- Postpaid metering: the fare is the odometer, not the estimate -----------
-// Destow bills the distance actually driven on a long round trip, so the money
-// is decided after the vehicle comes back rather than when it is booked. These
-// cover the hinge: the partner reports, the customer agrees, and only then does
-// the amount change.
-
-async function drivenTrip(pricePerKmPaise = 1800, paymentMethod: 'upi' | 'cash' = 'upi') {
-  const customer = await createUser();
-  const { vehicle, owner } = await bookableVehicle(pricePerKmPaise);
-  const driver = await createDriver(owner.id, {
-    name: 'Rajesh',
-    phone: `98765${String(driverSeq++).padStart(5, '0')}`,
-  });
-  const pickup = AT(240);
-  const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod,
-  });
-  await acceptBooking(owner.id, booking.id);
-  await assignDriver(owner.id, booking.id, driver.id);
-  await startTrip(owner.id, booking.id);
-  return { customer, owner, booking };
-}
-
-test('completing a trip records the odometer rather than settling the fare', async () => {
-  const { owner, booking } = await drivenTrip();
-  const estimateKm = Math.round(booking.distanceM / 1000);
-
-  const done = await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 42_318,
-    odometerEndKm: 42_318 + estimateKm + 118,
-  });
-
-  expect(done.status).toBe('completed');
-  expect(done.actualDistanceM).toBe((estimateKm + 118) * 1000);
-  expect(done.distanceSubmittedAt).not.toBeNull();
-  // The amount has not moved: the customer has not seen the reading yet.
-  expect(done.totalFarePaise).toBe(booking.totalFarePaise);
-  expect(done.distanceConfirmedAt).toBeNull();
-  expect(done.paymentStatus).toBe('pending');
-});
-
-// A closing reading with an extra digit turns a Rs 21,000 trip into a Rs 210,000
-// one. The customer does confirm the figure, but "tap to approve" is a weak last
-// line of defence against a number that should never have been storable.
-test('an odometer reading far beyond the estimate is refused', async () => {
-  const { owner, booking } = await drivenTrip();
-  await expectReject(
-    completeTrip(owner.id, booking.id, {
-      odometerStartKm: 42_318,
-      odometerEndKm: 42_318 + Math.round(booking.distanceM / 1000) * 10,
-    }),
-    422,
-  );
-});
-
-test('a closing reading below the opening one is refused', () => {
-  const r = submitOdometerBody.safeParse({ odometerStartKm: 43_512, odometerEndKm: 42_318 });
-  expect(r.success).toBe(false);
-});
-
-test('confirming the distance rebills at the frozen rate and keeps the estimate', async () => {
-  const { customer, owner, booking } = await drivenTrip(1800);
-  const estimateKm = Math.round(booking.distanceM / 1000);
-  const actualKm = estimateKm + 118;
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 42_318, odometerEndKm: 42_318 + actualKm,
-  });
-
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-
-  expect(confirmed.actualDistanceM).toBe(actualKm * 1000);
-  expect(confirmed.totalFarePaise).toBe(Math.round((1800 * actualKm * 1000) / 1000));
-  expect(confirmed.distanceConfirmedAt).not.toBeNull();
-  // The quote survives the recompute, so "quoted vs charged" can still be shown.
-  expect(confirmed.estimatedFarePaise).toBe(booking.totalFarePaise);
-  expect(confirmed.totalFarePaise).toBeGreaterThan(confirmed.estimatedFarePaise);
-
-  // Commission follows the money actually charged, and still reconciles.
-  const [row] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
-  expect(row.commissionPaise + row.providerPayoutPaise).toBe(row.totalFarePaise);
-  // The rate itself was frozen at booking and must not have moved.
-  expect(row.pricePerKmPaise).toBe(1800);
-});
-
-// A shorter trip than estimated bills less. The customer is charged for what
-// the vehicle ran, in both directions.
-test('a trip shorter than the estimate is billed down, not held at the quote', async () => {
-  const { customer, owner, booking } = await drivenTrip(1200);
-  const shortKm = Math.round(booking.distanceM / 1000) - 60;
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 10_000, odometerEndKm: 10_000 + shortKm,
-  });
-
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-  expect(confirmed.totalFarePaise).toBe(1200 * shortKm);
-  expect(confirmed.totalFarePaise).toBeLessThan(confirmed.estimatedFarePaise);
-});
-
-// A double tap, or a retry after a dropped response, must not recompute and
-// re-charge.
-test('confirming twice does not move the fare again', async () => {
-  const { customer, owner, booking } = await drivenTrip();
-  const actualKm = Math.round(booking.distanceM / 1000) + 40;
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 5_000, odometerEndKm: 5_000 + actualKm,
-  });
-
-  const first = await confirmTripDistance(customer.id, booking.id);
-  const second = await confirmTripDistance(customer.id, booking.id);
-  expect(second.totalFarePaise).toBe(first.totalFarePaise);
-  expect(second.distanceConfirmedAt).toBe(first.distanceConfirmedAt);
-});
-
-test('a trip with no submitted odometer cannot be confirmed', async () => {
-  const { customer, booking } = await drivenTrip();
-  await expectReject(confirmTripDistance(customer.id, booking.id), 409);
-});
-
-test('someone else cannot confirm your distance', async () => {
-  const { owner, booking } = await drivenTrip();
-  const stranger = await createUser();
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 1_000, odometerEndKm: 1_000 + Math.round(booking.distanceM / 1000),
-  });
-  await expectReject(confirmTripDistance(stranger.id, booking.id), 404);
-});
-
-// --- #34: a cancelled trip must never end up marked paid ---------------------
-// Reachable with no race at all: the customer opens a payment, cancels while it
-// is in flight - nothing is refunded, because nothing was paid yet - and the
-// gateway then captures and fires its webhook. Guarding only on payment status
-// let that settle, leaving a booking both cancelled and paid, money taken, and
-// nothing anywhere saying so.
-
-test('a payment confirmed after cancellation does not settle the booking', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = `pay_late_${booking.id.slice(0, 6)}`;
-
-  // Cancel out from under the in-flight payment.
-  await db
-    .update(bookings)
-    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
-    .where(eq(bookings.id, booking.id));
-
-  await expectReject(
-    confirmPayment(customer.id, booking.id, {
-      orderId, paymentId, signature: stubSignature(orderId, paymentId),
-    }),
-    409,
-  );
-
-  const row = await rowFor(booking.id);
-  expect(row.paymentStatus).toBe('pending');
-  expect(row.transactionRef).toBeNull();
-  expect(row.paidAt).toBeNull();
-});
-
-test('a webhook for a cancelled booking does not settle it', async () => {
-  const { customer, booking } = await payableBooking();
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = `pay_hook_${booking.id.slice(0, 6)}`;
-
-  await db
-    .update(bookings)
-    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
-    .where(eq(bookings.id, booking.id));
-
-  const body = stubWebhookBody({ orderId, paymentId, amountPaise: booking.totalFarePaise });
-  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
-
-  // Acknowledged rather than errored - the gateway did nothing wrong and
-  // retrying will not help - but explicitly not settled.
-  expect(result.handled).toBe(false);
-  expect(result.reason).toMatch(/cancelled/i);
-
-  const row = await rowFor(booking.id);
-  expect(row.paymentStatus).toBe('pending');
-  expect(row.paidAt).toBeNull();
-});
-
 // --- The cancellation fee, shown before they commit --------------------------
 // The policy lived in platform_settings and was readable only from inside the
 // refund routine, so the app could not state the fee at the moment it mattered.
@@ -2478,7 +2010,7 @@ test('a trip well before pickup previews as free to cancel', async () => {
   const pickup = AT(72);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   const preview = await previewCancellation(customer.id, booking.id);
@@ -2496,7 +2028,7 @@ test('a trip inside the window previews the fee it will actually charge', async 
   const pickup = AT(2);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   const preview = await previewCancellation(customer.id, booking.id);
@@ -2528,7 +2060,7 @@ test('someone else cannot see what your cancellation would cost', async () => {
   const pickup = AT(50);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   await expectReject(previewCancellation(stranger.id, booking.id), 404);
 });
@@ -2541,7 +2073,7 @@ test('a cancelled booking carries its settled outcome', async () => {
   const pickup = AT(2);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   const cancelled = await cancelMyBooking(customer.id, booking.id);
@@ -2551,309 +2083,212 @@ test('a cancelled booking carries its settled outcome', async () => {
   expect(cancelled.refundPaise).toBe(0);
 });
 
-// --- Payment mandates: what makes billing after the fact collectable ---------
-// Destow charges once the trip is over and the customer has agreed the
-// odometer. Without standing permission that model has no ending - a customer
-// can confirm the distance and never pay, and a cancellation fee is a number we
-// write down and can never collect.
 
-async function activeMandateFor(userId: string, label = 'ananya@okhdfc') {
-  const setup = await setupMandate(userId, { method: 'upi', vpa: 'ananya@okhdfc' });
-  return confirmMandate(userId, {
-    mandateId: setup.mandateId,
-    orderId: setup.orderId,
-    paymentId: 'pay_auth_stub',
-    signature: stubMandateSignature(setup.orderId, 'pay_auth_stub'),
-    token: `token_${userId.slice(0, 8)}`,
-    label,
+// --- Paying: a QR for the exact fare, or cash the driver confirms ------------
+// The fare is settled when the driver closes the trip with an odometer reading;
+// paying is the customer agreeing to it. Nothing is stored that could be charged
+// later - a QR is raised for one amount and dies with the payment.
+
+let seq = 20_000;
+
+async function drivenTrip(pricePerKmPaise = 1800) {
+  const customer = await createUser();
+  const { vehicle, owner } = await bookableVehicle(pricePerKmPaise);
+  const driver = await createDriver(owner.id, {
+    name: 'Rajesh',
+    phone: `98765${String(seq++).padStart(5, '0')}`,
   });
+  const pickup = AT(240);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  return { customer, owner, booking };
 }
 
-test('setting up a mandate takes no money and is not chargeable yet', async () => {
-  const customer = await createUser();
-  const setup = await setupMandate(customer.id, { method: 'upi', vpa: 'ananya@okhdfc' });
-
-  expect(setup.orderId).toMatch(/^order_mand_/);
-  expect(setup.maxAmountPaise).toBeGreaterThan(0);
-
-  const [row] = await db
-    .select()
-    .from(paymentMethods)
-    .where(eq(paymentMethods.id, setup.mandateId));
-  expect(row.status).toBe('pending');
-  expect(row.token).toBeNull();
-
-  // Pending is not chargeable, so nothing can be taken against it.
-  const outcome = await chargeCustomer({
-    userId: customer.id, bookingId: setup.mandateId, amountPaise: 1000,
+async function finishedTrip(pricePerKmPaise = 1800, extraKm = 118) {
+  const t = await drivenTrip(pricePerKmPaise);
+  const km = Math.round(t.booking.distanceM / 1000) + extraKm;
+  const done = await completeTrip(t.owner.id, t.booking.id, {
+    odometerStartKm: 42_318, odometerEndKm: 42_318 + km,
   });
-  expect(outcome.charged).toBe(false);
-  expect(outcome.reason).toMatch(/no active payment method/);
+  return { ...t, km, done };
+}
+
+test('closing the trip settles the fare, without a separate confirmation', async () => {
+  const { done, km } = await finishedTrip(1800);
+  expect(done.status).toBe('completed');
+  expect(done.actualDistanceM).toBe(km * 1000);
+  // Recomputed from the odometer at the frozen rate, and owed immediately.
+  expect(done.totalFarePaise).toBe(1800 * km);
+  expect(done.paymentStatus).toBe('pending');
+  expect(done.commissionPaise + done.providerPayoutPaise).toBe(done.totalFarePaise);
 });
 
-// Without verifying the signature a client could hand us any string and we
-// would charge against it later, with nobody watching.
-test('a mandate with a forged signature is refused', async () => {
+test('the QR is for the metered fare, never the estimate', async () => {
+  const { customer, booking, km } = await finishedTrip(1800);
+  const qr = await startQrPayment(customer.id, booking.id);
+
+  expect(qr.amountPaise).toBe(1800 * km);
+  expect(qr.amountPaise).toBeGreaterThan(booking.totalFarePaise); // estimate was lower
+  expect(qr.payload).toMatch(/^upi:\/\/pay\?/);
+  expect(qr.payload).toContain((qr.amountPaise / 100).toFixed(2));
+  expect(qr.alreadyPaid).toBe(false);
+});
+
+// The fare is not final until the driver has closed the trip, so a QR raised
+// earlier would ask the customer for the estimate.
+test('no QR before the trip has finished', async () => {
+  const { customer, booking } = await drivenTrip();
+  await expectReject(startQrPayment(customer.id, booking.id), 409);
+});
+
+test('no QR for a cancelled booking', async () => {
   const customer = await createUser();
-  const setup = await setupMandate(customer.id, { method: 'upi', vpa: 'ananya@okhdfc' });
-
-  await expectReject(
-    confirmMandate(customer.id, {
-      mandateId: setup.mandateId,
-      orderId: setup.orderId,
-      paymentId: 'pay_auth_stub',
-      signature: 'deadbeef',
-      token: 'token_attacker',
-    }),
-    400,
-  );
-
-  const [row] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, setup.mandateId));
-  expect(row.status).toBe('pending');
-  expect(row.token).toBeNull();
-});
-
-test('approving a mandate activates it and never returns the token', async () => {
-  const customer = await createUser();
-  const method = await activeMandateFor(customer.id);
-
-  expect(method.status).toBe('active');
-  expect(method.label).toBe('ananya@okhdfc');
-  expect(method.isDefault).toBe(true);
-  // The token authorises charges; it has no business leaving the server.
-  expect(JSON.stringify(method)).not.toMatch(/token_/);
-});
-
-// Charging happens automatically with nobody watching, so "which method did it
-// use" has to have exactly one answer.
-test('approving a second mandate retires the first', async () => {
-  const customer = await createUser();
-  const first = await activeMandateFor(customer.id, 'first@okhdfc');
-  const second = await activeMandateFor(customer.id, 'second@okaxis');
-
-  expect(second.status).toBe('active');
-  const [old] = await db.select().from(paymentMethods).where(eq(paymentMethods.id, first.id));
-  expect(old.status).toBe('revoked');
-
-  const active = await db
-    .select()
-    .from(paymentMethods)
-    .where(and(eq(paymentMethods.userId, customer.id), eq(paymentMethods.status, 'active')));
-  expect(active).toHaveLength(1);
-});
-
-test('confirming the same mandate twice does not activate a second one', async () => {
-  const customer = await createUser();
-  const setup = await setupMandate(customer.id, { method: 'upi', vpa: 'ananya@okhdfc' });
-  const body = {
-    mandateId: setup.mandateId,
-    orderId: setup.orderId,
-    paymentId: 'pay_auth_stub',
-    signature: stubMandateSignature(setup.orderId, 'pay_auth_stub'),
-    token: 'token_repeat',
-  };
-  const a = await confirmMandate(customer.id, body);
-  const b = await confirmMandate(customer.id, body);
-  expect(b.id).toBe(a.id);
-  expect(b.status).toBe('active');
-});
-
-test('a revoked mandate cannot be charged', async () => {
-  const customer = await createUser();
-  const method = await activeMandateFor(customer.id);
-  await revokeMandate(customer.id, method.id);
-
-  const outcome = await chargeCustomer({
-    userId: customer.id, bookingId: method.id, amountPaise: 5000,
-  });
-  expect(outcome.charged).toBe(false);
-});
-
-// The gateway refuses anything above the ceiling the customer agreed to, so
-// catching it here turns a hard failure into a clear one.
-test('a charge above the agreed ceiling is refused rather than attempted', async () => {
-  const customer = await createUser();
-  await activeMandateFor(customer.id);
-
-  const outcome = await chargeCustomer({
-    userId: customer.id, bookingId: 'over-cap', amountPaise: MANDATE_MAX_AMOUNT_PAISE + 1,
-  });
-  expect(outcome.charged).toBe(false);
-  expect(outcome.reason).toMatch(/exceeds the agreed limit/);
-});
-
-// The whole point: confirming the distance is the customer agreeing the amount,
-// so that is the moment it is taken.
-test('confirming the distance charges the mandate for the metered fare', async () => {
-  const { customer, owner, booking } = await drivenTrip(1800);
-  await activeMandateFor(customer.id);
-  const actualKm = Math.round(booking.distanceM / 1000) + 90;
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 30_000, odometerEndKm: 30_000 + actualKm,
-  });
-
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-
-  expect(confirmed.paymentStatus).toBe('paid');
-  expect(confirmed.totalFarePaise).toBe(1800 * actualKm);
-  const row = await rowFor(booking.id);
-  expect(row.transactionRef).toMatch(/^pay_auto_/);
-  expect(row.paidAt).not.toBeNull();
-});
-
-// A customer with no payment method must not get a free trip by never adding
-// one. The trip happened and the distance is agreed, so the money is owed.
-test('confirming with no payment method leaves the fare owed, not waived', async () => {
-  const { customer, owner, booking } = await drivenTrip();
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 60_000, odometerEndKm: 60_000 + Math.round(booking.distanceM / 1000),
-  });
-
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-  expect(confirmed.paymentStatus).toBe('pending');
-  expect(confirmed.distanceConfirmedAt).not.toBeNull();
-  expect(confirmed.totalFarePaise).toBeGreaterThan(0);
-});
-
-test('cancelling late collects the fee from the mandate', async () => {
-  const customer = await createUser();
-  await activeMandateFor(customer.id);
   const { vehicle } = await bookableVehicle(1000);
-  const pickup = AT(2);
+  const pickup = AT(300);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'upi',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
-
   await cancelMyBooking(customer.id, booking.id);
-
-  const row = await rowFor(booking.id);
-  expect(row.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
-  expect(row.paymentStatus).toBe('paid');
-  expect(row.transactionRef).toMatch(/^pay_auto_/);
+  await expectReject(startQrPayment(customer.id, booking.id), 409);
 });
 
-test('a free cancellation charges nothing', async () => {
-  const customer = await createUser();
-  await activeMandateFor(customer.id);
-  const { vehicle } = await bookableVehicle(1000);
-  const pickup = AT(96);
-  const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip', paymentMethod: 'cash',
+test('scanning the QR settles the booking', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+
+  expect((await paymentStatus(customer.id, booking.id)).paymentStatus).toBe('pending');
+
+  const body = stubWebhookBody({
+    qrId: qr.qrId, paymentId: 'pay_qr_1', amountPaise: qr.amountPaise,
   });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(true);
 
-  await cancelMyBooking(customer.id, booking.id);
-
+  const after = await paymentStatus(customer.id, booking.id);
+  expect(after.paymentStatus).toBe('paid');
+  expect(after.paidAt).not.toBeNull();
   const row = await rowFor(booking.id);
-  expect(row.cancellationFeePaise).toBe(0);
-  expect(row.paymentStatus).toBe('pending');
+  expect(row.paymentMethod).toBe('upi');
+  expect(row.transactionRef).toBe('pay_qr_1');
 });
 
-test('you cannot revoke or see somebody else"s payment method', async () => {
-  const owner = await createUser();
+test('an unsigned QR credit changes nothing', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_2', amountPaise: qr.amountPaise });
+
+  await expectReject(handlePaymentWebhook(body, 'not-a-signature'), 400);
+  expect((await rowFor(booking.id)).paymentStatus).toBe('pending');
+});
+
+// A signature proves the gateway sent the event, not that the right amount
+// arrived. Without this a part payment would settle the trip in full.
+test('a QR credit for the wrong amount does not settle', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_3', amountPaise: 100 });
+
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+  expect((await rowFor(booking.id)).paymentStatus).toBe('pending');
+});
+
+// #34: reachable with no race - the QR is raised, the trip is called off, and
+// the customer scans anyway.
+test('a QR credit for a cancelled booking does not settle it', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  await db
+    .update(bookings)
+    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
+    .where(eq(bookings.id, booking.id));
+
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_4', amountPaise: qr.amountPaise });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+
+  expect(result.handled).toBe(false);
+  expect(result.reason).toMatch(/cancelled/i);
+  expect((await rowFor(booking.id)).paymentStatus).toBe('pending');
+});
+
+test('a second credit for the same QR does not settle twice', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_5', amountPaise: qr.amountPaise });
+
+  await handlePaymentWebhook(body, stubWebhookSignature(body));
+  const first = await rowFor(booking.id);
+  const again = await handlePaymentWebhook(body, stubWebhookSignature(body));
+
+  expect(again.alreadyPaid).toBe(true);
+  expect((await rowFor(booking.id)).paidAt?.getTime()).toBe(first.paidAt?.getTime());
+});
+
+test('asking for a QR on a settled trip says so rather than raising another', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_6', amountPaise: qr.amountPaise });
+  await handlePaymentWebhook(body, stubWebhookSignature(body));
+
+  const again = await startQrPayment(customer.id, booking.id);
+  expect(again.alreadyPaid).toBe(true);
+  expect(again.qrId).toBe('');
+});
+
+// --- Cash: the driver confirms, because the driver is holding it -------------
+
+test('the driver confirming cash settles the trip', async () => {
+  const { owner, booking, km } = await finishedTrip(1200);
+  const settled = await confirmCashCollected(owner.id, booking.id);
+
+  expect(settled.paymentStatus).toBe('paid');
+  expect(settled.paymentMethod).toBe('cash');
+  expect(settled.totalFarePaise).toBe(1200 * km);
+  // Nothing moved through a gateway, so there is nothing to reference.
+  expect(settled.transactionRef).toBeNull();
+  expect(settled.paidAt).not.toBeNull();
+});
+
+test('confirming cash twice settles once', async () => {
+  const { owner, booking } = await finishedTrip();
+  const first = await confirmCashCollected(owner.id, booking.id);
+  const second = await confirmCashCollected(owner.id, booking.id);
+  expect(second.paidAt?.getTime()).toBe(first.paidAt?.getTime());
+});
+
+test('cash cannot be confirmed before the trip has finished', async () => {
+  const { owner, booking } = await drivenTrip();
+  await expectReject(confirmCashCollected(owner.id, booking.id), 409);
+});
+
+test('another partner cannot confirm cash on your trip', async () => {
+  const { booking } = await finishedTrip();
   const stranger = await createUser();
-  const method = await activeMandateFor(owner.id);
-
-  await expectReject(revokeMandate(stranger.id, method.id), 404);
-  expect(await listMyPaymentMethods(stranger.id)).toHaveLength(0);
-  expect(await listMyPaymentMethods(owner.id)).toHaveLength(1);
+  const other = await registerProvider(stranger.id, { ...AGENCY, gstin: undefined }, ctx);
+  await setProviderStatus(other.id, 'approved');
+  await expectReject(confirmCashCollected(stranger.id, booking.id), 404);
 });
 
-// --- Cash: settled at the roadside, and it inverts who owes whom -------------
-// On a UPI trip Destow collects the fare and owes the partner the payout. On a
-// cash trip the driver takes the whole fare at the end, so Destow owes nothing
-// and the partner owes Destow the commission. Reporting them as one number
-// tells a partner money is coming when it is not, and hides a receivable.
+test('cash and UPI land on opposite sides of the ledger', async () => {
+  const cash = await finishedTrip(1200, 0);
+  await confirmCashCollected(cash.owner.id, cash.booking.id);
+  const cashEarnings = await getEarnings(cash.owner.id);
+  expect(cashEarnings.cashTrips).toBe(1);
+  expect(cashEarnings.onlinePayoutDuePaise).toBe(0);
+  expect(cashEarnings.netPositionPaise).toBe(-cashEarnings.cashCommissionDuePaise);
 
-test('a cash trip settles on confirmation with no gateway involved', async () => {
-  const { customer, owner, booking } = await drivenTrip(1200, 'cash');
-  const km = Math.round(booking.distanceM / 1000) + 40;
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 80_000, odometerEndKm: 80_000 + km,
-  });
-
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-
-  expect(confirmed.paymentMethod).toBe('cash');
-  expect(confirmed.paymentStatus).toBe('paid');
-  expect(confirmed.totalFarePaise).toBe(1200 * km);
-  // Nothing moved through a gateway, so there is no payment to reference.
-  const row = await rowFor(booking.id);
-  expect(row.transactionRef).toBeNull();
-  expect(row.paidAt).not.toBeNull();
-});
-
-test('cash needs no payment method on file', async () => {
-  const { customer, owner, booking } = await drivenTrip(1000, 'cash');
-  expect(await listMyPaymentMethods(customer.id)).toHaveLength(0);
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 1_000, odometerEndKm: 1_000 + Math.round(booking.distanceM / 1000),
-  });
-  const confirmed = await confirmTripDistance(customer.id, booking.id);
-  expect(confirmed.paymentStatus).toBe('paid');
-});
-
-test('a cash trip leaves the partner owing Destow the commission', async () => {
-  const { customer, owner, booking } = await drivenTrip(1200, 'cash');
-  const km = Math.round(booking.distanceM / 1000);
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 5_000, odometerEndKm: 5_000 + km,
-  });
-  await confirmTripDistance(customer.id, booking.id);
-
-  const e = await getEarnings(owner.id);
-  expect(e.cashTrips).toBe(1);
-  expect(e.onlineTrips).toBe(0);
-  // Destow owes nothing on a fare it never held.
-  expect(e.onlinePayoutDuePaise).toBe(0);
-  expect(e.cashCommissionDuePaise).toBeGreaterThan(0);
-  // Negative net position: the partner owes us.
-  expect(e.netPositionPaise).toBe(-e.cashCommissionDuePaise);
-});
-
-test('a UPI trip leaves Destow owing the partner the payout', async () => {
-  const { customer, owner, booking } = await drivenTrip(1200, 'upi');
-  await activeMandateFor(customer.id);
-  const km = Math.round(booking.distanceM / 1000);
-  await completeTrip(owner.id, booking.id, {
-    odometerStartKm: 5_000, odometerEndKm: 5_000 + km,
-  });
-  await confirmTripDistance(customer.id, booking.id);
-
-  const e = await getEarnings(owner.id);
-  expect(e.onlineTrips).toBe(1);
-  expect(e.cashTrips).toBe(0);
-  expect(e.cashCommissionDuePaise).toBe(0);
-  expect(e.onlinePayoutDuePaise).toBeGreaterThan(0);
-  expect(e.netPositionPaise).toBe(e.onlinePayoutDuePaise);
-  // The two halves still reconcile to the fare.
-  expect(e.commissionPaise + e.netPayoutPaise).toBe(e.grossPaise);
-});
-
-// A cash customer has no mandate, so a late cancellation fee is recorded and
-// owed. Pretending to collect it would be a lie in the ledger.
-test('a late cash cancellation records the fee but takes nothing', async () => {
-  const customer = await createUser();
-  const { vehicle } = await bookableVehicle(1000);
-  const pickup = AT(2);
-  const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
-    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup),
-    tripType: 'round_trip', paymentMethod: 'cash',
-  });
-
-  await cancelMyBooking(customer.id, booking.id);
-
-  const row = await rowFor(booking.id);
-  expect(row.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
-  expect(row.paymentStatus).toBe('pending');
-  expect(row.transactionRef).toBeNull();
-});
-
-test('a UPI ID that is not one is refused', () => {
-  for (const bad of ['notavpa', 'a@', '@okhdfc', 'has space@okhdfc', '']) {
-    expect(setupMandateBody.safeParse({ method: 'upi', vpa: bad }).success).toBe(false);
-  }
-  expect(setupMandateBody.safeParse({ vpa: 'Ananya.Rao@OKHDFC' }).success).toBe(true);
+  const upi = await finishedTrip(1200, 0);
+  const qr = await startQrPayment(upi.customer.id, upi.booking.id);
+  const body = stubWebhookBody({ qrId: qr.qrId, paymentId: 'pay_qr_7', amountPaise: qr.amountPaise });
+  await handlePaymentWebhook(body, stubWebhookSignature(body));
+  const upiEarnings = await getEarnings(upi.owner.id);
+  expect(upiEarnings.onlineTrips).toBe(1);
+  expect(upiEarnings.cashCommissionDuePaise).toBe(0);
+  expect(upiEarnings.netPositionPaise).toBe(upiEarnings.onlinePayoutDuePaise);
 });

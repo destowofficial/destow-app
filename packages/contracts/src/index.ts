@@ -13,7 +13,6 @@ export * from './search';
 export * from './geo';
 export * from './fleet';
 export * from './bookings';
-export * from './payment-methods';
 export * from './fulfilment';
 export * from './ratings';
 export * from './payments';

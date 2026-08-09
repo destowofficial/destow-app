@@ -7,6 +7,7 @@ import {
   assignDriver,
   startTrip,
   completeTrip,
+  confirmCashCollected,
   getEarnings,
 } from '../../services/providers/fulfilment.service.js';
 import { parseOrThrow, uuidParam } from '../../lib/http/validate.js';
@@ -50,4 +51,10 @@ export async function completeTripController(req: Request, res: Response) {
 
 export async function earningsController(req: Request, res: Response) {
   ok(res, { earnings: await getEarnings(callerId(req)) });
+}
+
+// The driver's slide-to-confirm. Takes no body: the amount is what the trip
+// cost, and a driver naming their own figure is the thing this prevents.
+export async function cashCollectedController(req: Request, res: Response) {
+  ok(res, { booking: await confirmCashCollected(callerId(req), uuidParam(req.params.id)) });
 }

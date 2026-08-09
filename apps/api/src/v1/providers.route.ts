@@ -18,6 +18,7 @@ import {
   assignDriverController,
   startTripController,
   completeTripController,
+  cashCollectedController,
   earningsController,
 } from '../controllers/providers/fulfilment.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth/auth.js';
@@ -57,6 +58,9 @@ providersRouter.post('/bookings/:id/reject', partnerOnly, rejectBookingControlle
 providersRouter.post('/bookings/:id/assign', partnerOnly, assignDriverController);
 providersRouter.post('/bookings/:id/start', partnerOnly, startTripController);
 providersRouter.post('/bookings/:id/complete', partnerOnly, completeTripController);
+// Cash handed over at the roadside. The driver confirms it because they are the
+// one holding it - a customer must not be able to close a trip they never paid.
+providersRouter.post('/bookings/:id/cash-collected', partnerOnly, cashCollectedController);
 
 // Gross, commission deducted, and what is actually payable.
 providersRouter.get('/earnings', partnerOnly, earningsController);

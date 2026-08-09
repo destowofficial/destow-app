@@ -33,26 +33,17 @@ export interface RefundResult {
   amountPaise: number;
 }
 
-// A mandate is standing permission to charge after a trip. Setting one up takes
-// no money: the customer authorises a ceiling, and what comes back is a token.
-export interface MandateAuthorisation {
-  // The gateway's handle for this authorisation, used to reconcile the approval
-  // when it comes back. Not a checkout to open - the mandate request goes to the
-  // customer's UPI app, and they approve it there.
-  orderId: string;
-  // The gateway's handle for this customer, needed to charge later.
-  customerRef: string;
-}
-
-export interface MandateSignature {
-  orderId: string;
-  paymentId: string;
-  signature: string;
-}
-
-export interface MandateCharge {
-  paymentId: string;
+// A dynamic UPI QR raised for one exact amount. The customer scans it in their
+// own UPI app and pays; the gateway tells us when the money lands. Nothing is
+// stored against the customer and there is no standing permission to charge -
+// the QR is the whole authorisation, and it dies with the payment.
+export interface UpiQr {
+  // The gateway's handle, used to reconcile the webhook back to this booking.
+  qrId: string;
+  // The UPI payload the client renders as a QR. Any UPI app can read it.
+  payload: string;
   amountPaise: number;
+  expiresAt: string;
 }
 
 export interface PaymentProvider {
@@ -68,28 +59,10 @@ export interface PaymentProvider {
   verifyPayment(sig: PaymentSignature): boolean;
   verifyWebhook(rawBody: string, signature: string): boolean;
 
-  // --- Mandates ------------------------------------------------------------
-  // Open an authorisation for a standing permission to charge. Takes no money.
-  authoriseMandate(input: {
-    userId: string;
-    maxAmountPaise: number;
-    method: 'upi';
-    // Collected on our own screen, not in a gateway checkout - the mandate
-    // request is pushed to this address and approved in the customer's UPI app.
-    vpa: string;
-  }): Promise<MandateAuthorisation>;
-  // Whether the customer really approved that authorisation. Same construction
-  // as verifyPayment, and the same reason: without it a client could claim an
-  // authorisation it never obtained and hand us a token of its choosing.
-  verifyMandate(sig: MandateSignature): boolean;
-  // Charge an approved mandate. This runs with nobody watching, after the trip,
-  // which is exactly why the amount is always computed server-side.
-  chargeMandate(input: {
-    token: string;
-    customerRef: string;
-    amountPaise: number;
-    bookingId: string;
-  }): Promise<MandateCharge>;
+  // --- UPI QR --------------------------------------------------------------
+  // Raise a QR for exactly what this trip cost. Amount is always server-side:
+  // the client asks for a QR for a booking, never for an amount.
+  createUpiQr(input: { bookingId: string; amountPaise: number }): Promise<UpiQr>;
 }
 
 // Constant-time compare over hex digests of equal length. A plain === leaks,
@@ -138,49 +111,16 @@ class RazorpayProvider implements PaymentProvider {
     );
   }
 
-  async authoriseMandate(_input: {
-    userId: string;
-    maxAmountPaise: number;
-    method: 'upi';
-    vpa: string;
-  }): Promise<MandateAuthorisation> {
+  async createUpiQr(_input: { bookingId: string; amountPaise: number }): Promise<UpiQr> {
     return observeAsync(
       externalRequestDuration,
       externalRequestsTotal,
-      { provider: 'razorpay', operation: 'authorise_mandate' },
+      { provider: 'razorpay', operation: 'create_upi_qr' },
       async () => {
         throw new Error(
-          'RazorpayProvider.authoriseMandate not implemented - create the customer, then ' +
-            'raise a UPI AutoPay authorisation against input.vpa. Needs the account to be ' +
-            'entitled to the server-side recurring flow; confirm the request shape with ' +
-            'Razorpay before wiring it.',
-        );
-      },
-    );
-  }
-
-  // The authorisation is signed exactly like a payment, so this is the same
-  // construction and needs no network - the security-critical half is testable
-  // long before live keys exist.
-  verifyMandate({ orderId, paymentId, signature }: MandateSignature): boolean {
-    const expected = hmacHex(env.RAZORPAY_KEY_SECRET ?? '', `${orderId}|${paymentId}`);
-    return safeEqualHex(expected, signature);
-  }
-
-  async chargeMandate(_input: {
-    token: string;
-    customerRef: string;
-    amountPaise: number;
-    bookingId: string;
-  }): Promise<MandateCharge> {
-    return observeAsync(
-      externalRequestDuration,
-      externalRequestsTotal,
-      { provider: 'razorpay', operation: 'charge_mandate' },
-      async () => {
-        throw new Error(
-          'RazorpayProvider.chargeMandate not implemented - POST /v1/orders then ' +
-            'POST /v1/payments/create/recurring with the saved token',
+          'RazorpayProvider.createUpiQr not implemented - POST /v1/payments/qr_codes ' +
+            "with type 'upi_qr', usage 'single_use' and a fixed payment_amount. " +
+            "Settlement arrives as the 'qr_code.credited' webhook.",
         );
       },
     );
@@ -211,6 +151,10 @@ class RazorpayProvider implements PaymentProvider {
 // thing so the verification path under test is the production one. A stub that
 // returned `true` would leave the only security-critical branch untested.
 const STUB_SECRET = 'destow-stub-payment-secret';
+
+// How long a QR stands before it has to be raised again. Short enough that a
+// stale code cannot be paid against a fare that has since changed.
+const QR_TTL_MS = 15 * 60_000;
 
 class StubPaymentProvider implements PaymentProvider {
   readonly name = 'stub';
@@ -249,55 +193,30 @@ class StubPaymentProvider implements PaymentProvider {
     return safeEqualHex(hmacHex(STUB_SECRET, rawBody), signature);
   }
 
-  async authoriseMandate(input: {
-    userId: string;
-    maxAmountPaise: number;
-    method: 'upi';
-    vpa: string;
-  }): Promise<MandateAuthorisation> {
-    const auth = await observeAsync(
+  async createUpiQr(input: { bookingId: string; amountPaise: number }): Promise<UpiQr> {
+    const qr = await observeAsync(
       externalRequestDuration,
       externalRequestsTotal,
-      { provider: 'stub', operation: 'authorise_mandate' },
-      async () => ({
-        orderId: `order_mand_${input.userId.replace(/-/g, '').slice(0, 18)}`,
-        customerRef: `cust_stub_${input.userId.replace(/-/g, '').slice(0, 14)}`,
-      }),
+      { provider: 'stub', operation: 'create_upi_qr' },
+      async () => {
+        const qrId = `qr_stub_${input.bookingId.replace(/-/g, '').slice(0, 18)}`;
+        return {
+          qrId,
+          // The shape a real UPI intent takes, so the client renders something a
+          // UPI app would actually accept rather than a placeholder.
+          payload:
+            `upi://pay?pa=destow@stub&pn=Destow&am=${(input.amountPaise / 100).toFixed(2)}` +
+            `&cu=INR&tr=${qrId}`,
+          amountPaise: input.amountPaise,
+          expiresAt: new Date(Date.now() + QR_TTL_MS).toISOString(),
+        };
+      },
     );
-    recordPaymentEvent('stub', 'upi', 'mandate_authorised');
-    return auth;
-  }
-
-  verifyMandate({ orderId, paymentId, signature }: MandateSignature): boolean {
-    return safeEqualHex(hmacHex(STUB_SECRET, `${orderId}|${paymentId}`), signature);
-  }
-
-  async chargeMandate(input: {
-    token: string;
-    customerRef: string;
-    amountPaise: number;
-    bookingId: string;
-  }): Promise<MandateCharge> {
-    const charge = await observeAsync(
-      externalRequestDuration,
-      externalRequestsTotal,
-      { provider: 'stub', operation: 'charge_mandate' },
-      async () => ({
-        paymentId: `pay_auto_${input.bookingId.replace(/-/g, '').slice(0, 16)}`,
-        amountPaise: input.amountPaise,
-      }),
-    );
-    recordPaymentEvent('stub', 'upi', 'mandate_charged');
-    return charge;
+    recordPaymentEvent('stub', 'upi', 'qr_created');
+    return qr;
   }
 }
 
-// Exposed for the same reason stubSignature is: tests and local clients need to
-// produce an approval the stub accepts, exercising the code path a real
-// gateway's signature takes rather than a shortcut around it.
-export function stubMandateSignature(orderId: string, paymentId: string): string {
-  return hmacHex(STUB_SECRET, `${orderId}|${paymentId}`);
-}
 
 // Exposed so tests (and local clients) can produce a signature the stub accepts,
 // exercising the same code path a real gateway's signature takes.
@@ -309,20 +228,24 @@ export function stubWebhookSignature(rawBody: string): string {
   return hmacHex(STUB_SECRET, rawBody);
 }
 
-// Builds a webhook body in the shape Razorpay sends, so tests exercise the same
-// parsing and reconciliation a real event will.
+// Builds a webhook body in the shape a QR credit arrives in, so tests exercise
+// the same parsing and reconciliation a real event will. Both entities are
+// present because both matter: the payment carries the amount, the QR is what
+// ties it back to a booking.
 export function stubWebhookBody(input: {
-  orderId: string;
+  qrId: string;
   paymentId: string;
   amountPaise: number;
   status?: string;
 }): string {
   return JSON.stringify({
+    event: 'qr_code.credited',
     payload: {
+      qr_code: { entity: { id: input.qrId } },
       payment: {
         entity: {
           id: input.paymentId,
-          order_id: input.orderId,
+          qr_code_id: input.qrId,
           amount: input.amountPaise,
           status: input.status ?? 'captured',
         },

@@ -2,7 +2,6 @@ import type { Request, Response } from 'express';
 import {
   createBookingBody,
   listBookingsQuery,
-  confirmPaymentBody,
   createRatingBody,
 } from '@destow/contracts';
 import {
@@ -10,13 +9,9 @@ import {
   getMyBooking,
   listMyBookings,
   cancelMyBooking,
-  confirmTripDistance,
   previewCancellation,
 } from '../../services/bookings/bookings.service.js';
-import {
-  startPayment,
-  confirmPayment,
-} from '../../services/bookings/payments.service.js';
+import { startQrPayment, paymentStatus } from '../../services/bookings/payments.service.js';
 import { rateBooking, getBookingRating } from '../../services/bookings/ratings.service.js';
 import { parseOrThrow, uuidParam } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
@@ -46,22 +41,16 @@ export async function cancelBookingController(req: Request, res: Response) {
 }
 
 // --- Payment ------------------------------------------------------------------
-export async function startPaymentController(req: Request, res: Response) {
-  ok(res, { payment: await startPayment(callerId(req), uuidParam(req.params.id)) });
+export async function startQrPaymentController(req: Request, res: Response) {
+  ok(res, { payment: await startQrPayment(callerId(req), uuidParam(req.params.id)) });
 }
 
-export async function confirmPaymentController(req: Request, res: Response) {
-  const body = parseOrThrow(confirmPaymentBody, req.body);
-  ok(
-    res,
-    await confirmPayment(
-      callerId(req),
-      uuidParam(req.params.id),
-      { orderId: body.orderId, paymentId: body.paymentId, signature: body.signature },
-      body.method,
-    ),
-  );
+// Polled by the QR screen while the customer is paying. Kept separate from the
+// booking read so it stays cheap enough to call every couple of seconds.
+export async function paymentStatusController(req: Request, res: Response) {
+  ok(res, { payment: await paymentStatus(callerId(req), uuidParam(req.params.id)) });
 }
+
 
 // --- Rating -------------------------------------------------------------------
 export async function rateBookingController(req: Request, res: Response) {
@@ -73,12 +62,6 @@ export async function getRatingController(req: Request, res: Response) {
   ok(res, { rating: await getBookingRating(callerId(req), uuidParam(req.params.id)) });
 }
 
-// The customer agreeing the odometer. Takes no body: the figure being confirmed
-// is the one the partner submitted and the customer was shown, so accepting a
-// distance from the client here would let them name their own price.
-export async function confirmDistanceController(req: Request, res: Response) {
-  ok(res, { booking: await confirmTripDistance(callerId(req), uuidParam(req.params.id)) });
-}
 
 // Read-only: what cancelling would cost right now. Separate from the cancel
 // endpoint on purpose, so the screen can show the number without the customer
