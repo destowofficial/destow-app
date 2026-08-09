@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, StyleSheet, type ColorValue } from 'react-native';
 import { Tabs, Redirect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon, type IconName } from '../../components/ui/Icon';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -34,7 +34,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color: c, focused }) => (
-            <Icon name={focused ? 'home' : 'home-outline'} tint={c} />
+            <TabIcon name="home" tint={c} focused={focused} />
           ),
         }}
       />
@@ -43,7 +43,7 @@ export default function TabsLayout() {
         options={{
           title: 'Trips',
           tabBarIcon: ({ color: c, focused }) => (
-            <Icon name={focused ? 'list' : 'list-outline'} tint={c} />
+            <TabIcon name="list" tint={c} focused={focused} />
           ),
         }}
       />
@@ -52,7 +52,7 @@ export default function TabsLayout() {
         options={{
           title: 'Profile',
           tabBarIcon: ({ color: c, focused }) => (
-            <Icon name={focused ? 'person' : 'person-outline'} tint={c} />
+            <TabIcon name="user" tint={c} focused={focused} />
           ),
         }}
       />
@@ -60,10 +60,12 @@ export default function TabsLayout() {
   );
 }
 
-function Icon({ name, tint }: { name: keyof typeof Ionicons.glyphMap; tint: ColorValue }) {
+// A heavier stroke when selected, which is how the set signals state - it has
+// no separate filled variants the way Ionicons did.
+function TabIcon({ name, tint, focused }: { name: IconName; tint: ColorValue; focused: boolean }) {
   return (
     <View style={styles.icon}>
-      <Ionicons name={name} size={f(22)} color={tint} />
+      <Icon name={name} size={22} color={String(tint)} strokeWidth={focused ? 2.4 : 1.8} />
     </View>
   );
 }

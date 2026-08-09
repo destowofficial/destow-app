@@ -1,7 +1,6 @@
 import React from 'react';
-import { Linking, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import type { CustomerBooking } from '@destow/contracts';
 import {
   Badge,
@@ -19,6 +18,7 @@ import {
   Screen,
   Small,
 } from '../../../components/ui/kit';
+import { Icon } from '../../../components/ui/Icon';
 import { color, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { getBooking } from '../../../services/destow';
@@ -89,13 +89,14 @@ export default function TripDetail() {
                 </Small>
               </View>
               {b.driverPhone ? (
-                <Ionicons
-                  name="call"
-                  size={f(18)}
-                  color={color.ok}
+                <Pressable
                   onPress={() => Linking.openURL(`tel:${b.driverPhone}`)}
                   style={styles.call}
-                />
+                  accessibilityRole="button"
+                  accessibilityLabel={`Call ${b.driverName}`}
+                >
+                  <Icon name="phone" size={18} color={color.ok} />
+                </Pressable>
               ) : null}
             </Row>
           </Card>
@@ -260,9 +261,8 @@ const styles = StyleSheet.create({
     height: s(40),
     borderRadius: 999,
     backgroundColor: color.okWash,
-    textAlign: 'center',
-    textAlignVertical: 'center',
-    lineHeight: s(40),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   timeline: { marginTop: s(12) },

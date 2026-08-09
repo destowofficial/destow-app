@@ -1,8 +1,8 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { Card, ErrorState, H2, Hero, Label, Loading, P, Row, Screen, Small } from '../../components/ui/kit';
+import { Icon } from '../../components/ui/Icon';
 import { color, radius, shadow, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { listCities, listPopularRoutes } from '../../services/destow';
@@ -55,7 +55,7 @@ export default function Home() {
         <Card lift style={styles.search}>
           <Pressable onPress={() => start()} accessibilityRole="button">
             <View style={styles.leg}>
-              <Ionicons name="ellipse-outline" size={f(17)} color={color.ok} />
+              <Icon name="dot" size={17} color={color.ok} />
               <View style={styles.legText}>
                 <Label>From</Label>
                 <Text style={styles.legValue}>Delhi</Text>
@@ -63,14 +63,14 @@ export default function Home() {
             </View>
             <View style={styles.legDivider} />
             <View style={styles.leg}>
-              <Ionicons name="location-outline" size={f(17)} color={color.red} />
+              <Icon name="pin" size={17} color={color.red} />
               <View style={styles.legText}>
                 <Label>To</Label>
                 <Text style={[styles.legValue, styles.legPlaceholder]}>Where are you going?</Text>
               </View>
             </View>
             <View style={styles.searchCta}>
-              <Ionicons name="search" size={f(16)} color={color.white} />
+              <Icon name="search" size={16} color={color.white} />
               <Text style={styles.searchCtaText}>Search</Text>
             </View>
           </Pressable>
@@ -97,7 +97,7 @@ export default function Home() {
               <Card key={`${r.from}-${r.to}`} style={styles.row} onPress={() => start(r.from, r.to)}>
                 <Row>
                   <View style={styles.plate}>
-                    <Ionicons name="location-outline" size={f(18)} color={color.blue} />
+                    <Icon name="pin" size={18} color={color.blue} />
                   </View>
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>
@@ -105,7 +105,7 @@ export default function Home() {
                     </Text>
                     <Small>{r.bookings} trips booked</Small>
                   </View>
-                  <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+                  <Icon name="forward" size={16} color={color.dim} />
                 </Row>
               </Card>
             ))}
@@ -120,13 +120,13 @@ export default function Home() {
               <Card key={c.id} style={styles.row} onPress={() => start('Delhi', c.name)}>
                 <Row>
                   <View style={styles.plate}>
-                    <Ionicons name="location-outline" size={f(18)} color={color.blue} />
+                    <Icon name="pin" size={18} color={color.blue} />
                   </View>
                   <View style={styles.rowText}>
                     <Text style={styles.rowTitle}>{c.name}</Text>
                     {c.state ? <Small>{c.state}</Small> : null}
                   </View>
-                  <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+                  <Icon name="forward" size={16} color={color.dim} />
                 </Row>
               </Card>
             ))}

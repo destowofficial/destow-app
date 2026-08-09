@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Button, Card, Divider, ErrorState, Footer, H1, H3, Loading, P, Row, Screen, Small,
 } from '../../../components/ui/kit';
+import { Icon } from '../../../components/ui/Icon';
 import { color, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { previewCancellation, cancelBooking } from '../../../services/destow';
@@ -82,7 +82,7 @@ export default function Cancel() {
         {!c.isFree ? (
           <Card tone="warn" style={styles.note}>
             <Row style={styles.noteRow}>
-              <Ionicons name="time-outline" size={f(17)} color={color.warn} />
+              <Icon name="clock" size={17} color={color.warn} />
               <Text style={styles.noteText}>
                 Your driver has held this vehicle for you. The fee is what the operator keeps for
                 the day they lose.

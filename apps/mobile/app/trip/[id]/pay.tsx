@@ -1,7 +1,6 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Card,
   Divider,
@@ -14,6 +13,7 @@ import {
   Screen,
   Small,
 } from '../../../components/ui/kit';
+import { Icon } from '../../../components/ui/Icon';
 import { color, radius, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { getBooking } from '../../../services/destow';
@@ -99,14 +99,14 @@ export default function Pay() {
               <Text style={styles.methodName}>UPI</Text>
               <Small>Scan a QR with any UPI app</Small>
             </View>
-            <Ionicons name="chevron-forward" size={f(17)} color={color.dim} />
+            <Icon name="forward" size={17} color={color.dim} />
           </Row>
         </Card>
 
         <Card style={styles.method}>
           <Row>
             <View style={[styles.plate, { backgroundColor: color.okWash }]}>
-              <Ionicons name="cash-outline" size={f(19)} color={color.ok} />
+              <Icon name="wallet" size={19} color={color.ok} />
             </View>
             <View style={styles.methodText}>
               <Text style={styles.methodName}>Cash</Text>

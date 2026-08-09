@@ -1,7 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Badge,
   Button,
@@ -16,6 +15,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { Icon } from '../../components/ui/Icon';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { getBooking } from '../../services/destow';
@@ -46,7 +46,7 @@ export default function Confirmed() {
     <Screen>
       <View style={styles.body}>
         <View style={styles.tick}>
-          <Ionicons name="checkmark" size={f(40)} color={color.ok} />
+          <Icon name="tick" size={40} color={color.ok} />
         </View>
 
         <View style={styles.headline}>
@@ -80,7 +80,7 @@ export default function Confirmed() {
         </Card>
 
         <View style={styles.note}>
-          <Ionicons name="information-circle-outline" size={f(16)} color={color.dim} />
+          <Icon name="info" size={16} color={color.dim} />
           <Small style={styles.noteText}>
             When you get back, your driver submits the odometer reading. You pay for the kilometres
             actually run, by UPI or cash.

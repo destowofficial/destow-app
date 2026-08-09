@@ -1,10 +1,10 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Button, Card, Divider, ErrorState, Footer, H1, H3, Loading, P, Row, Screen, Small,
 } from '../../../components/ui/kit';
+import { Icon } from '../../../components/ui/Icon';
 import { color, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { getBooking } from '../../../services/destow';
@@ -25,7 +25,7 @@ export default function Paid() {
     <Screen>
       <View style={styles.body}>
         <View style={styles.tick}>
-          <Ionicons name="checkmark" size={f(40)} color={color.ok} />
+          <Icon name="tick" size={40} color={color.ok} />
         </View>
 
         <View style={styles.headline}>

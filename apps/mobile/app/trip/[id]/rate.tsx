@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { Button, ErrorState, Footer, H1, Loading, P, Screen, Small } from '../../../components/ui/kit';
+import { Icon } from '../../../components/ui/Icon';
 import { color, radius, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { getBooking, rateBooking } from '../../../services/destow';
@@ -70,10 +70,11 @@ export default function Rate() {
         <View style={styles.stars}>
           {[1, 2, 3, 4, 5].map((n) => (
             <Pressable key={n} onPress={() => setStars(n)} hitSlop={6} accessibilityLabel={`${n} stars`}>
-              <Ionicons
-                name={n <= stars ? 'star' : 'star-outline'}
-                size={f(34)}
+              <Icon
+                name="star"
+                size={34}
                 color={n <= stars ? color.star : color.line}
+                strokeWidth={n <= stars ? 2.6 : 1.6}
               />
             </Pressable>
           ))}

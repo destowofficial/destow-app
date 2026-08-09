@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Button,
   Card,
@@ -15,6 +14,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { Icon, type IconName } from '../../components/ui/Icon';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { listCities } from '../../services/destow';
@@ -73,7 +73,7 @@ export default function Plan() {
             accessibilityRole="button"
             accessibilityLabel="Choose where you are travelling from"
           >
-            <Ionicons name="ellipse-outline" size={f(17)} color={color.ok} />
+            <Icon name="dot" size={17} color={color.ok} />
             <View style={styles.legText}>
               <Label>From</Label>
               <Text style={[styles.legValue, !draft.from && styles.placeholder]}>
@@ -88,7 +88,7 @@ export default function Plan() {
             accessibilityRole="button"
             accessibilityLabel="Choose where you are going"
           >
-            <Ionicons name="location-outline" size={f(17)} color={color.red} />
+            <Icon name="pin" size={17} color={color.red} />
             <View style={styles.legText}>
               <Label>To</Label>
               <Text style={[styles.legValue, !draft.to && styles.placeholder]}>
@@ -99,7 +99,7 @@ export default function Plan() {
         </Card>
 
         <DateRow
-          icon="calendar-outline"
+          icon="calendar"
           label="Departure"
           value={`${dayDate(pickup)} · ${time(pickup)}`}
           onEarlier={() => shift('pickup', -1)}
@@ -116,7 +116,7 @@ export default function Plan() {
 
         <Card tone="blue" style={styles.note}>
           <Row style={{ justifyContent: 'flex-start', gap: s(10), alignItems: 'flex-start' }}>
-            <Ionicons name="information-circle-outline" size={f(17)} color={color.blueDark} />
+            <Icon name="info" size={17} color={color.blueDark} />
             <Text style={styles.noteText}>
               The vehicle and driver stay with you for the whole trip. You pay afterwards, for the
               kilometres actually run.
@@ -160,7 +160,7 @@ export default function Plan() {
                       <Text style={styles.cityName}>{c.name}</Text>
                       {c.state ? <Small>{c.state}</Small> : null}
                     </View>
-                    <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+                    <Icon name="forward" size={16} color={color.dim} />
                   </Row>
                 </Card>
               ))}
@@ -180,7 +180,7 @@ function DateRow({
   onEarlier,
   onLater,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   label: string;
   value: string;
   tint?: string;
@@ -191,7 +191,7 @@ function DateRow({
     <Card style={styles.dateCard}>
       <Row>
         <View style={[styles.plate, { backgroundColor: tint === color.ok ? color.okWash : color.blueWash }]}>
-          <Ionicons name={icon} size={f(18)} color={tint} />
+          <Icon name={icon} size={18} color={tint} />
         </View>
         <View style={styles.legText}>
           <Label>{label}</Label>
@@ -199,10 +199,10 @@ function DateRow({
         </View>
         <View style={styles.stepper}>
           <Pressable onPress={onEarlier} hitSlop={8} style={styles.step} accessibilityLabel={`${label} earlier`}>
-            <Ionicons name="remove" size={f(16)} color={color.sub} />
+            <Icon name="minus" size={16} color={color.sub} />
           </Pressable>
           <Pressable onPress={onLater} hitSlop={8} style={styles.step} accessibilityLabel={`${label} later`}>
-            <Ionicons name="add" size={f(16)} color={color.sub} />
+            <Icon name="plus" size={16} color={color.sub} />
           </Pressable>
         </View>
       </Row>

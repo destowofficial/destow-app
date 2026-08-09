@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { Card, Divider, H2, Hero, Row, Screen, Small } from '../../components/ui/kit';
+import { Icon, type IconName } from '../../components/ui/Icon';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { config } from '../../constants/config';
@@ -46,23 +46,23 @@ export default function Profile() {
       <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
         <Card lift style={styles.menu}>
           <Item
-            icon="person-outline"
+            icon="user"
             label="Edit profile"
             onPress={() => router.push('/(auth)/signup')}
           />
           <Divider style={styles.itemDivider} />
           <Item
-            icon="phone-portrait-outline"
+            icon="device"
             label="Signed-in devices"
             onPress={() => router.push('/devices')}
           />
           <Divider style={styles.itemDivider} />
-          <Item icon="help-circle-outline" label="Help and support" onPress={() => router.push('/help')} />
+          <Item icon="help" label="Help and support" onPress={() => router.push('/help')} />
         </Card>
 
         <Card style={styles.menu}>
           <Item
-            icon="log-out-outline"
+            icon="signOut"
             label="Sign out"
             tone="red"
             onPress={busy ? undefined : confirmSignOut}
@@ -83,7 +83,7 @@ function Item({
   onPress,
   tone,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: IconName;
   label: string;
   onPress?: () => void;
   tone?: 'red';
@@ -94,11 +94,11 @@ function Item({
     <Card onPress={onPress} style={styles.item}>
       <Row>
         <View style={[styles.plate, { backgroundColor: bg }]}>
-          <Ionicons name={icon} size={f(18)} color={tint} />
+          <Icon name={icon} size={18} color={tint} />
         </View>
         <Text style={[styles.itemLabel, tone === 'red' && { color: color.red }]}>{label}</Text>
         {tone !== 'red' ? (
-          <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+          <Icon name="forward" size={16} color={color.dim} />
         ) : null}
       </Row>
     </Card>

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Button,
   Card,
@@ -13,6 +12,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { Icon } from '../../components/ui/Icon';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { createBooking } from '../../services/destow';
@@ -81,9 +81,9 @@ export default function Review() {
         <Card>
           <View style={styles.legs}>
             <View style={styles.rail}>
-              <Ionicons name="ellipse-outline" size={f(14)} color={color.ok} />
+              <Icon name="dot" size={14} color={color.ok} />
               <View style={styles.railLine} />
-              <Ionicons name="location" size={f(14)} color={color.red} />
+              <Icon name="pin" size={14} color={color.red} />
             </View>
             <View style={styles.legText}>
               <View>
@@ -135,7 +135,7 @@ export default function Review() {
 
         <Card tone="blue" style={styles.note}>
           <Row style={styles.noteRow}>
-            <Ionicons name="information-circle-outline" size={f(17)} color={color.blueDark} />
+            <Icon name="info" size={17} color={color.blueDark} />
             <Text style={styles.noteText}>
               An estimate, not the bill. Your driver reads the odometer at the end and you pay for
               the kilometres actually run.
@@ -149,7 +149,7 @@ export default function Review() {
       <Footer>
         <Button label="Confirm booking" onPress={book} loading={busy} />
         <View style={styles.reassure}>
-          <Ionicons name="checkmark-circle-outline" size={f(13)} color={color.dim} />
+          <Icon name="tickCircle" size={13} color={color.dim} />
           <Small> Nothing is charged now</Small>
         </View>
       </Footer>

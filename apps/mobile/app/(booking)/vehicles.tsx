@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import type { VehicleCategory } from '@destow/contracts';
 import {
   Card,
@@ -14,6 +13,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { Icon } from '../../components/ui/Icon';
 import { ListSkeleton } from '../../components/ui/Skeleton';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
@@ -91,7 +91,7 @@ export default function Vehicles() {
                   {v.modelName ? <Small>{v.modelName}</Small> : null}
                 </View>
                 <View style={styles.seats}>
-                  <Ionicons name="person-outline" size={f(12)} color={color.blueDark} />
+                  <Icon name="user" size={12} color={color.blueDark} />
                   <Text style={styles.seatsText}>{v.seats}</Text>
                 </View>
               </Row>
@@ -99,11 +99,7 @@ export default function Vehicles() {
               <Row>
                 <View style={styles.meta}>
                   <View style={styles.rating}>
-                    <Ionicons
-                      name="star"
-                      size={f(12)}
-                      color={v.providerRatingAvg ? color.star : color.dim}
-                    />
+                    <Icon name="star" size={12} color={v.providerRatingAvg ? color.star : color.dim} />
                     <Text style={styles.ratingText}>
                       {v.providerRatingAvg ? v.providerRatingAvg.toFixed(1) : 'New'}
                     </Text>

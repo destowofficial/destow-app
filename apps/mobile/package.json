@@ -5,7 +5,8 @@
   "dependencies": {
     "@destow/contracts": "workspace:*",
     "@expo-google-fonts/inter": "^0.4.2",
-    "@expo/vector-icons": "^15.1.1",
+    "@hugeicons/core-free-icons": "^4.2.3",
+    "@hugeicons/react-native": "^1.0.15",
     "date-fns": "^4.4.0",
     "expo": "~57.0.11",
     "expo-constants": "~57.0.9",

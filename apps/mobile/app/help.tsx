@@ -1,8 +1,8 @@
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { Card, Header, Label, Row, Screen, Small } from '../components/ui/kit';
+import { Icon } from '../components/ui/Icon';
 import { color, radius, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
 import { config } from '../constants/config';
@@ -52,13 +52,13 @@ export default function Help() {
         >
           <Row>
             <View style={styles.plate}>
-              <Ionicons name="mail-outline" size={f(18)} color={color.blue} />
+              <Icon name="mail" size={18} color={color.blue} />
             </View>
             <View style={styles.contactText}>
               <Text style={styles.contactTitle}>Still stuck?</Text>
               <Small>{config.supportEmail}</Small>
             </View>
-            <Ionicons name="chevron-forward" size={f(16)} color={color.dim} />
+            <Icon name="forward" size={16} color={color.dim} />
           </Row>
         </Card>
       </ScrollView>

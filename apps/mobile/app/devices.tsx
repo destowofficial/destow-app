@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import {
   Badge, Button, Card, Empty, ErrorState, Footer, Header, Loading, P, Row, Screen, Small,
 } from '../components/ui/kit';
+import { Icon } from '../components/ui/Icon';
 import { ListSkeleton } from '../components/ui/Skeleton';
 import { color, radius, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
@@ -54,7 +54,7 @@ export default function Devices() {
             <Card key={sn.id} selected={sn.current} style={styles.row}>
               <Row>
                 <View style={styles.plate}>
-                  <Ionicons name="phone-portrait-outline" size={f(18)} color={sn.current ? color.blue : color.sub} />
+                  <Icon name="device" size={18} color={sn.current ? color.blue : color.sub} />
                 </View>
                 <View style={styles.text}>
                   <Text style={styles.name}>{sn.deviceName ?? sn.platform ?? 'Unknown device'}</Text>
