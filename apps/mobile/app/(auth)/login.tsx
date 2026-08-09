@@ -11,6 +11,7 @@ import {
   Small,
 } from '../../components/ui/kit';
 import { Logo } from '../../components/ui/Logo';
+import { Icon } from '../../components/ui/Icon';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { requestOtp } from '../../services/destow';
@@ -62,11 +63,15 @@ export default function Login() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.body}>
-          <Logo height={s(30)} />
+          <View style={styles.brand}>
+            <Logo height={s(32)} />
+          </View>
 
           <View style={styles.intro}>
             <H1>Your number</H1>
-            <P style={{ fontSize: f(14) }}>We&apos;ll text you a six-digit code to confirm it.</P>
+            <P style={[{ fontSize: f(14) }, styles.introText]}>
+              We&apos;ll text you a six-digit code to confirm it.
+            </P>
           </View>
 
           <View style={[styles.entry, digits.length > 0 && styles.entryFocused]}>
@@ -94,7 +99,7 @@ export default function Login() {
             <Text style={styles.error}>{error}</Text>
           ) : (
             <View style={styles.reassure}>
-              <Text style={styles.lock}>􀎡</Text>
+              <Icon name="shield" size={14} color={color.dim} />
               <Small style={styles.reassureText}>
                 Your number is used to sign you in and to let the driver reach you. Nothing else.
               </Small>
@@ -115,8 +120,19 @@ export default function Login() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(20), gap: s(22) },
-  intro: { gap: s(7) },
+  // Centred rather than top-aligned. There are three things on this screen and
+  // stacking them under the notch leaves the bottom two thirds empty, which
+  // reads as an unfinished screen rather than a calm one.
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: s(18),
+    paddingBottom: s(40),
+    gap: s(22),
+  },
+  brand: { alignItems: 'center', marginBottom: s(6) },
+  introText: { textAlign: 'center' },
+  intro: { gap: s(7), alignItems: 'center' },
   entry: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -139,9 +155,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     padding: 0,
   },
-  reassure: { flexDirection: 'row', gap: s(9), alignItems: 'flex-start' },
+  reassure: { flexDirection: 'row', gap: s(9), alignItems: 'flex-start', paddingHorizontal: s(4) },
   reassureText: { flex: 1 },
-  lock: { fontSize: f(13), color: color.dim, marginTop: f(1) },
-  error: { fontSize: f(13), color: color.red, lineHeight: f(19) },
+  error: { fontSize: f(13), color: color.red, lineHeight: f(19), textAlign: 'center' },
   legal: { textAlign: 'center', marginTop: s(12) },
 });

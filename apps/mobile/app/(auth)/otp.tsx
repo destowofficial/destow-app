@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { Button, Card, Footer, H1, P, Screen, Small } from '../../components/ui/kit';
+import { Logo } from '../../components/ui/Logo';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { requestOtp, verifyOtp } from '../../services/destow';
@@ -87,9 +88,13 @@ export default function Otp() {
       </View>
 
       <View style={styles.body}>
+        <View style={styles.brand}>
+          <Logo height={s(28)} />
+        </View>
+
         <View style={styles.intro}>
           <H1>Enter the code</H1>
-          <P style={{ fontSize: f(14) }}>
+          <P style={[{ fontSize: f(14) }, styles.introText]}>
             Sent to {pretty} · <Text style={styles.change} onPress={() => router.back()}>Change</Text>
           </P>
         </View>
@@ -170,9 +175,19 @@ export default function Otp() {
 const styles = StyleSheet.create({
   top: { paddingHorizontal: s(18), paddingTop: s(2) },
   chev: { fontSize: f(30), lineHeight: f(30), color: color.ink },
-  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(22), gap: s(22) },
-  intro: { gap: s(7) },
+  // Same reasoning as the phone screen: six boxes and a countdown do not fill a
+  // phone, so they sit in the middle rather than clinging to the top.
+  body: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: s(18),
+    paddingBottom: s(40),
+    gap: s(22),
+  },
+  brand: { alignItems: 'center', marginBottom: s(6) },
+  intro: { gap: s(7), alignItems: 'center' },
   change: { color: color.blue, fontWeight: weight.bold },
+  introText: { textAlign: 'center' },
 
   boxes: { flexDirection: 'row', gap: s(9) },
   box: {
