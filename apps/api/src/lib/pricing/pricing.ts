@@ -1,4 +1,3 @@
-import type { TripType } from '@destow/contracts';
 import { clampCommissionBps, BPS_DIVISOR } from './money.js';
 import { AppError } from '../http/errors.js';
 
@@ -13,8 +12,8 @@ const MAX_FARE_PAISE = 2_000_000_000; // Rs 20,000,000
 const MAX_DISTANCE_M = 5_000_000;
 
 export interface FareBreakdown {
-  // The distance actually charged for. For a round trip that is both legs, so
-  // it is not the same as the one-way route distance.
+  // The distance charged for, exactly as passed in. Doubling for the return leg
+  // happens at the call site, not here - see roundTripDistanceM.
   distanceM: number;
   pricePerKmPaise: number;
   totalFarePaise: number;
@@ -23,23 +22,25 @@ export interface FareBreakdown {
   providerPayoutPaise: number;
 }
 
+// A route quote gives the distance one way; the vehicle drives it twice. This
+// is deliberately a separate step rather than a flag on computeFare: the fare
+// is computed twice in a booking's life, once from this doubled estimate and
+// once from the odometer, and the odometer figure is *already* both legs.
+// A hidden tripType-driven doubling would silently bill the metered trip twice.
+export function roundTripDistanceM(oneWayDistanceM: number): number {
+  return oneWayDistanceM * 2;
+}
+
 // The single place fare + commission are computed. Pure, integer-paise, server-side.
-// total_fare   = price_per_km * distance
-// commission   = total_fare * commission_rate   (rate clamped to 15-20%)
+// total_fare   = price_per_km * distance      (distance already chargeable)
+// commission   = total_fare * commission_rate (rate clamped to 15-20%)
 // payout       = total_fare - commission
 export function computeFare(params: {
   pricePerKmPaise: number;
   distanceM: number;
   commissionBps: number;
-  tripType?: TripType;
 }): FareBreakdown {
-  const { pricePerKmPaise } = params;
-
-  // A round trip drives the route twice. Charging the one-way distance made the
-  // partner cover the return leg for free - on a Delhi-Manali return that is
-  // roughly 430 km of fuel and a day of the driver's time, unpaid.
-  const distanceM =
-    params.tripType === 'round_trip' ? params.distanceM * 2 : params.distanceM;
+  const { pricePerKmPaise, distanceM } = params;
   const commissionBps = clampCommissionBps(params.commissionBps);
   if (distanceM > MAX_DISTANCE_M) {
     throw AppError.unprocessable('Validation failed', {

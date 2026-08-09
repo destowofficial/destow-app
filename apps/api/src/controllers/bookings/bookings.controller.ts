@@ -10,6 +10,7 @@ import {
   getMyBooking,
   listMyBookings,
   cancelMyBooking,
+  confirmTripDistance,
 } from '../../services/bookings/bookings.service.js';
 import {
   startPayment,
@@ -69,4 +70,11 @@ export async function rateBookingController(req: Request, res: Response) {
 
 export async function getRatingController(req: Request, res: Response) {
   ok(res, { rating: await getBookingRating(callerId(req), uuidParam(req.params.id)) });
+}
+
+// The customer agreeing the odometer. Takes no body: the figure being confirmed
+// is the one the partner submitted and the customer was shown, so accepting a
+// distance from the client here would let them name their own price.
+export async function confirmDistanceController(req: Request, res: Response) {
+  ok(res, { booking: await confirmTripDistance(callerId(req), uuidParam(req.params.id)) });
 }

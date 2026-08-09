@@ -54,6 +54,14 @@ export async function startPayment(
     throw AppError.conflict('That booking was cancelled');
   }
 
+  // Postpaid: what this trip costs is not known until the vehicle is back and
+  // the customer has agreed the odometer. Opening an order before that would
+  // take the estimate, and the booking would read 'paid' while a longer trip
+  // went partly unbilled - the operator absorbing the difference silently.
+  if (!booking.distanceConfirmedAt) {
+    throw AppError.conflict('This trip cannot be paid for until the distance is confirmed');
+  }
+
   // Reuse the existing order rather than minting a new one per tap - otherwise a
   // customer who backs out of the checkout and retries accumulates open orders,
   // and a webhook for the abandoned one still resolves to this booking.
@@ -83,11 +91,18 @@ export async function startPayment(
 
 // The atomic settle. The WHERE clause excludes already-paid rows, so a second
 // caller updates nothing and we report success without charging twice.
+//
+// It also excludes cancelled rows (#34). Guarding only on payment status left a
+// reachable gap with no race in it: the customer starts a payment, cancels while
+// it is in flight - at which point nothing is refunded, because nothing was paid
+// yet - and the gateway then captures and fires its webhook. The settle
+// succeeded, leaving a booking both cancelled and paid, money taken, and nothing
+// flagged. Refusing here is what makes that visible instead of silent.
 async function markPaid(
   bookingId: string,
   paymentId: string,
   method?: PaymentMethod,
-): Promise<'settled' | 'already_paid'> {
+): Promise<'settled' | 'already_paid' | 'cancelled'> {
   const updated = await db
     .update(bookings)
     .set({
@@ -96,10 +111,25 @@ async function markPaid(
       paidAt: new Date(),
       ...(method ? { paymentMethod: method } : {}),
     })
-    .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')))
+    .where(
+      and(
+        eq(bookings.id, bookingId),
+        ne(bookings.paymentStatus, 'paid'),
+        ne(bookings.status, 'cancelled'),
+      ),
+    )
     .returning({ id: bookings.id });
 
-  return updated.length > 0 ? 'settled' : 'already_paid';
+  if (updated.length > 0) return 'settled';
+
+  // Nothing was updated, and the two reasons are not interchangeable: one is a
+  // duplicate to acknowledge, the other is captured money owed back.
+  const [row] = await db
+    .select({ status: bookings.status, paymentStatus: bookings.paymentStatus })
+    .from(bookings)
+    .where(eq(bookings.id, bookingId))
+    .limit(1);
+  return row?.status === 'cancelled' && row.paymentStatus !== 'paid' ? 'cancelled' : 'already_paid';
 }
 
 export async function confirmPayment(
@@ -125,6 +155,18 @@ export async function confirmPayment(
   }
 
   const outcome = await markPaid(booking.id, sig.paymentId, method);
+
+  // The trip was called off while this payment was in flight. The signature is
+  // real and the money is captured, so this is not a client error to hide - it
+  // is a refund we owe. Recorded loudly rather than swallowed as success.
+  if (outcome === 'cancelled') {
+    recordPaymentEvent(payments.name, method ?? 'upi', 'paid_after_cancel');
+    console.error(
+      `[payments] captured payment ${sig.paymentId} for cancelled booking ${booking.id} - refund owed`,
+    );
+    throw AppError.conflict('That booking was cancelled. The payment will be refunded.');
+  }
+
   recordPaymentEvent(payments.name, method ?? 'upi', outcome === 'settled' ? 'paid' : 'duplicate');
 
   return { bookingId: booking.id, paymentStatus: 'paid' as const, alreadyPaid: outcome === 'already_paid' };
@@ -196,6 +238,18 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
   }
 
   const outcome = await markPaid(booking.id, event.paymentId);
+
+  // Same case as confirmPayment, arriving the other way. The gateway gets a 200
+  // - it did nothing wrong and retrying will not help - but the captured money
+  // is logged as owed rather than quietly written onto a cancelled trip.
+  if (outcome === 'cancelled') {
+    recordPaymentEvent(payments.name, 'upi', 'paid_after_cancel');
+    console.error(
+      `[payments] webhook captured ${event.paymentId} for cancelled booking ${booking.id} - refund owed`,
+    );
+    return { handled: false, bookingId: booking.id, reason: 'booking was cancelled; refund owed' };
+  }
+
   recordPaymentEvent(payments.name, 'upi', outcome === 'settled' ? 'paid_webhook' : 'duplicate');
   return { handled: true, bookingId: booking.id, alreadyPaid: outcome === 'already_paid' };
 }

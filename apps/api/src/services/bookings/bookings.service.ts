@@ -1,4 +1,4 @@
-import { and, count, desc, eq, lt } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, lt } from 'drizzle-orm';
 import type {
   CreateBookingBody,
   CustomerBooking,
@@ -19,7 +19,7 @@ import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
 import { safeError } from '../../lib/log/safe.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
-import { computeFare } from '../../lib/pricing/pricing.js';
+import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
 
 // Drizzle wraps driver errors, so the Postgres SQLSTATE sits on the cause rather
@@ -60,6 +60,15 @@ function toCustomerBooking(r: Row): CustomerBooking {
     pricePerKmPaise: r.booking.pricePerKmPaise,
     totalFarePaise: r.booking.totalFarePaise,
     totalFareDisplay: formatPaise(r.booking.totalFarePaise),
+    // Falls back to the current total for rows written before the estimate was
+    // kept separately - for those the two genuinely were the same number.
+    estimatedFarePaise: r.booking.estimatedFarePaise ?? r.booking.totalFarePaise,
+    estimatedFareDisplay: formatPaise(r.booking.estimatedFarePaise ?? r.booking.totalFarePaise),
+    odometerStartKm: r.booking.odometerStartKm,
+    odometerEndKm: r.booking.odometerEndKm,
+    actualDistanceM: r.booking.actualDistanceM,
+    distanceSubmittedAt: r.booking.distanceSubmittedAt?.toISOString() ?? null,
+    distanceConfirmedAt: r.booking.distanceConfirmedAt?.toISOString() ?? null,
     vehicleTypeName: r.type.name,
     modelName: r.vehicle.modelName,
     registrationNo: r.vehicle.registrationNo,
@@ -87,16 +96,26 @@ function joinedBookings() {
     .innerJoin(serviceProviders, eq(serviceProviders.id, bookings.serviceProviderId));
 }
 
-// How long an unpaid booking may hold a vehicle. Without this, booking every
-// car and never paying takes a partner's whole fleet off the market for free -
-// the exclusion constraint counts a 'pending' booking as a live reservation.
-const HOLD_MINUTES = 30;
+// How long a booking the partner has not accepted may hold a vehicle. Without
+// this, booking every car and walking away takes a fleet off the market for
+// free - the exclusion constraint counts a 'pending' booking as a live
+// reservation.
+//
+// This deliberately does NOT look at payment status. It used to, and under the
+// postpaid model that would have cancelled essentially every booking: nothing
+// is paid until the trip is over, so 'pending' payment is the normal state of a
+// perfectly good trip booked weeks out. The condition that means "abandoned" is
+// that the partner has not accepted it, not that no money has arrived.
+//
+// Twelve hours rather than minutes because acceptance is a human action and
+// partners sleep - a trip booked at midnight must still be there in the morning.
+const ACCEPTANCE_WINDOW_HOURS = 12;
 
 // Released lazily, at the only moment it matters: when someone else wants this
 // vehicle. A sweeper job would also work, but this needs no scheduler and
 // cannot drift - contention is exactly when the check has to be correct.
 async function releaseExpiredHolds(vehicleId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - HOLD_MINUTES * 60_000);
+  const cutoff = new Date(Date.now() - ACCEPTANCE_WINDOW_HOURS * 3_600_000);
   await db
     .update(bookings)
     .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'system' })
@@ -104,7 +123,6 @@ async function releaseExpiredHolds(vehicleId: string): Promise<void> {
       and(
         eq(bookings.vehicleId, vehicleId),
         eq(bookings.status, 'pending'),
-        eq(bookings.paymentStatus, 'pending'),
         lt(bookings.createdAt, cutoff),
       ),
     );
@@ -136,19 +154,19 @@ export async function createBooking(
     throw AppError.conflict('That vehicle is no longer available to book');
   }
 
-  // Free any abandoned holds on this vehicle before competing for it, so an
-  // unpaid booking from an hour ago cannot block a paying customer.
+  // Free any abandoned holds on this vehicle before competing for it, so a
+  // booking nobody accepted cannot block a customer who wants the same car.
   await releaseExpiredHolds(found.vehicle.id);
 
   const distance = await resolveDistance(body.from, body.to);
 
-  // How long this trip takes the vehicle off the market. A round trip is held
-  // until the customer brings it back; a one-way for the drive itself. The
-  // max() guards a return date entered earlier than the journey can physically
-  // finish, which would otherwise free the vehicle mid-trip.
+  // How long this trip takes the vehicle off the market: until the customer
+  // brings it back. The max() guards a return date entered earlier than the
+  // journey can physically finish, which would otherwise free the vehicle while
+  // it is still out.
   const driveEndsAt = new Date(body.pickupDatetime.getTime() + distance.durationS * 1000);
   const occupiedUntil =
-    body.returnDatetime && body.returnDatetime > driveEndsAt ? body.returnDatetime : driveEndsAt;
+    body.returnDatetime > driveEndsAt ? body.returnDatetime : driveEndsAt;
 
   const [settings] = await db
     .select({ bps: platformSettings.commissionBps })
@@ -158,14 +176,13 @@ export async function createBooking(
     found.provider.commissionBpsOverride ?? settings?.bps ?? 1800,
   );
 
-  // The single place the money is decided. Same engine as the quote, same
-  // inputs, so the price a customer was shown is the price they get.
+  // An estimate, not the bill. The customer is charged for the distance the
+  // vehicle actually runs, which is only known when it comes back - so this
+  // freezes the rate and the commission split, and quotes a figure.
   const fare = computeFare({
     pricePerKmPaise: found.vehicle.pricePerKmPaise,
-    distanceM: distance.distanceM,
+    distanceM: roundTripDistanceM(distance.distanceM),
     commissionBps,
-    // A round trip is both legs, so the charged distance is twice the route.
-    tripType: body.tripType,
   });
 
   let created: typeof bookings.$inferSelect;
@@ -183,9 +200,11 @@ export async function createBooking(
       tripType: body.tripType,
       pickupDatetime: body.pickupDatetime,
       returnDatetime: body.returnDatetime,
-      // --- frozen snapshot: never recomputed for this booking again ---
+      // --- rate and commission frozen; the amount is recomputed once, when
+      //     the customer confirms the odometer ---
       pricePerKmPaise: fare.pricePerKmPaise,
       totalFarePaise: fare.totalFarePaise,
+      estimatedFarePaise: fare.totalFarePaise,
       commissionBps: fare.commissionBps,
       commissionPaise: fare.commissionPaise,
       providerPayoutPaise: fare.providerPayoutPaise,
@@ -278,16 +297,22 @@ export async function cancelMyBooking(
     .returning({ id: bookings.id });
   if (!updated) throw AppError.conflict('That booking changed while you were cancelling it');
 
+  // Under postpaid the usual case is that nothing has been paid, so a late
+  // cancellation is a charge rather than a deduction from a refund. Money is
+  // only ever in hand here if it was captured out of band or before the switch
+  // to metered billing - and if it is, it has to come back.
   if (existing.paymentStatus === 'paid') {
     await refundCancelledBooking(existing);
+  } else {
+    await recordCancellationFee(existing);
   }
 
   return getMyBooking(customerUserId, bookingId);
 }
 
-// Return the fare, minus whatever the policy retains for the partner. Called
-// only after the cancellation has been claimed, so it runs once per booking.
-async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Promise<void> {
+// The policy in force right now, resolved once so the fee and the refund paths
+// cannot drift apart.
+async function cancellationBreakdown(booking: typeof bookings.$inferSelect) {
   const [settings] = await db
     .select({
       freeHours: platformSettings.cancellationFreeHours,
@@ -296,12 +321,35 @@ async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Pr
     .from(platformSettings)
     .limit(1);
 
-  const breakdown = computeRefund({
+  return computeRefund({
     totalFarePaise: booking.totalFarePaise,
     pickupAt: booking.pickupDatetime,
     cancelledAt: new Date(),
     policy: { freeHours: settings?.freeHours ?? 24, feeBps: settings?.feeBps ?? 2500 },
   });
+}
+
+// Nothing was paid, so there is nothing to send back. The fee is computed from
+// the estimate and recorded as owed rather than collected: taking it needs a
+// payment method on file, which is its own piece of work. Writing it down is
+// what stops a late cancellation costing the partner a day for nothing while
+// leaving no trace that anything is due.
+async function recordCancellationFee(booking: typeof bookings.$inferSelect): Promise<void> {
+  const breakdown = await cancellationBreakdown(booking);
+  await db
+    .update(bookings)
+    .set({
+      cancellationFeePaise: breakdown.cancellationFeePaise,
+      refundPaise: 0,
+      refundedAt: new Date(),
+    })
+    .where(eq(bookings.id, booking.id));
+}
+
+// Return the fare, minus whatever the policy retains for the partner. Called
+// only after the cancellation has been claimed, so it runs once per booking.
+async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Promise<void> {
+  const breakdown = await cancellationBreakdown(booking);
 
   // Record the outcome even when nothing is returned, so a late cancellation
   // shows why the customer got nothing back rather than looking like a bug.
@@ -333,4 +381,55 @@ async function refundCancelledBooking(booking: typeof bookings.$inferSelect): Pr
     console.error(`[payments] refund failed for booking ${booking.id}: ${safeError(err)}`);
     await db.update(bookings).set(record).where(eq(bookings.id, booking.id));
   }
+}
+
+// The customer agrees the distance, and only then does the fare become real.
+//
+// This is the hinge of the whole postpaid model. Everything before it is an
+// estimate; everything after it is money. It is deliberately the customer's
+// action rather than an automatic settle on completion, because the party
+// entering the odometer is also the party being paid from it - without a
+// confirmation step the driver sets the price unilaterally.
+export async function confirmTripDistance(
+  customerUserId: string,
+  bookingId: string,
+): Promise<CustomerBooking> {
+  const [existing] = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
+    .limit(1);
+  if (!existing) throw AppError.notFound('Booking not found');
+
+  if (existing.status !== 'completed' || existing.actualDistanceM === null) {
+    throw AppError.conflict('That trip has no distance to confirm yet');
+  }
+  // Idempotent: a second tap, or a retry after a dropped response, returns the
+  // booking as it already stands rather than recomputing and re-charging.
+  if (existing.distanceConfirmedAt) return getMyBooking(customerUserId, bookingId);
+
+  // Recomputed from the odometer at the rate and commission frozen when the
+  // trip was booked. A price rise or a commission change since then must not
+  // reach a trip that has already been driven.
+  const fare = computeFare({
+    pricePerKmPaise: existing.pricePerKmPaise,
+    distanceM: existing.actualDistanceM,
+    commissionBps: existing.commissionBps,
+  });
+
+  // Claimed with distance_confirmed_at IS NULL in the WHERE, so two concurrent
+  // confirmations cannot both rewrite the fare.
+  const [updated] = await db
+    .update(bookings)
+    .set({
+      totalFarePaise: fare.totalFarePaise,
+      commissionPaise: fare.commissionPaise,
+      providerPayoutPaise: fare.providerPayoutPaise,
+      distanceConfirmedAt: new Date(),
+    })
+    .where(and(eq(bookings.id, bookingId), isNull(bookings.distanceConfirmedAt)))
+    .returning({ id: bookings.id });
+  if (!updated) return getMyBooking(customerUserId, bookingId);
+
+  return getMyBooking(customerUserId, bookingId);
 }

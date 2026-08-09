@@ -1,5 +1,5 @@
 import { and, count, desc, eq, sum } from 'drizzle-orm';
-import type { BookingStatus } from '@destow/contracts';
+import type { BookingStatus, SubmitOdometerBody } from '@destow/contracts';
 import { db } from '../../db/connection.js';
 import { bookings, drivers, vehicles, vehicleTypes, users } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
@@ -163,12 +163,46 @@ export async function startTrip(userId: string, bookingId: string) {
   return transition(booking.id, booking.status, 'ongoing');
 }
 
-export async function completeTrip(userId: string, bookingId: string) {
+// Sanity bound on the odometer, expressed against the routed estimate rather
+// than as an absolute: a fat-fingered closing reading (43512 typed as 435120)
+// otherwise turns a Rs 21,000 trip into a Rs 210,000 one. The customer does
+// confirm the figure, but "tap to approve" is a weak last line of defence
+// against a number that should never have been storable. Generous on purpose -
+// detours, local running and a wrong turn in the hills are all legitimate.
+const MAX_ACTUAL_OVER_ESTIMATE = 3;
+
+// The partner closes the trip by reporting what the vehicle actually ran. This
+// does not charge anything and does not settle the fare: it records the reading
+// and hands the customer something to confirm. Money moves in confirmDistance,
+// after the person paying has seen the number.
+export async function completeTrip(
+  userId: string,
+  bookingId: string,
+  body: SubmitOdometerBody,
+) {
   const { booking } = await ownBooking(userId, bookingId);
-  // The commission was frozen onto this row at creation; completing is what
-  // turns it from a quoted number into earned revenue, and completedAt is the
-  // date that revenue belongs to.
-  return transition(booking.id, booking.status, 'completed', { completedAt: new Date() });
+
+  const actualDistanceM = (body.odometerEndKm - body.odometerStartKm) * 1000;
+  const estimateM = booking.distanceM;
+  if (actualDistanceM > estimateM * MAX_ACTUAL_OVER_ESTIMATE) {
+    throw AppError.unprocessable('Validation failed', {
+      odometerEndKm: [
+        `That is ${Math.round(actualDistanceM / 1000)} km against an estimated ` +
+          `${Math.round(estimateM / 1000)} km. Check the readings.`,
+      ],
+    });
+  }
+
+  // completedAt is the date the trip happened. It is not the date revenue is
+  // earned any more - that is distanceConfirmedAt, because until the customer
+  // agrees the figure there is no amount to book.
+  return transition(booking.id, booking.status, 'completed', {
+    odometerStartKm: body.odometerStartKm,
+    odometerEndKm: body.odometerEndKm,
+    actualDistanceM,
+    distanceSubmittedAt: new Date(),
+    completedAt: new Date(),
+  });
 }
 
 export interface ProviderEarnings {
