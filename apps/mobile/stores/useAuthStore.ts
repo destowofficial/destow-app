@@ -29,8 +29,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   setPendingPhone: (pendingPhone) => set({ pendingPhone }),
 
   boot: async () => {
-    const user = await restoreSession();
-    set({ user, booting: false });
+    // Whatever happens, booting has to end. It gates the splash and the first
+    // route, so an unhandled rejection here is not an error message - it is an
+    // app that never opens, with nothing on screen to say why.
+    try {
+      const user = await restoreSession();
+      set({ user, booting: false });
+    } catch {
+      set({ user: null, booting: false });
+    }
   },
 
   signOut: async () => {

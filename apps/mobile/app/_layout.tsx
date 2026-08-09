@@ -22,7 +22,7 @@ SplashScreen.preventAutoHideAsync();
 // layout runs before the navigator has mounted, and expo-router throws on that -
 // which is exactly how this crashed on first open.
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
     Inter_600SemiBold,
@@ -41,8 +41,10 @@ export default function RootLayout() {
   // Hold the native splash until the fonts and the session are both settled, so
   // nobody sees the login screen for a frame before being sent to Home.
   useEffect(() => {
-    if (fontsLoaded && !booting) void SplashScreen.hideAsync();
-  }, [fontsLoaded, booting]);
+    // fontError counts as settled. A missing font is a screen that looks wrong;
+    // waiting forever for one is a screen nobody ever sees.
+    if ((fontsLoaded || fontError) && !booting) void SplashScreen.hideAsync();
+  }, [fontsLoaded, fontError, booting]);
 
   // Every screen sits on SafeAreaView and the footers read useSafeAreaInsets,
   // and that hook throws outright without a provider above it - which is the
