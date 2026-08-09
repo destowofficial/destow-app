@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../../db/connection.js';
 import { users, otps } from '../../db/schema.js';
 import { redis, incrWithTtl, observeRedis } from '../../db/redis.js';
@@ -168,6 +168,10 @@ export async function verifyOtp(
     recordAuthEvent('otp_verify', 'error', 'missing_or_expired');
     throw AppError.unauthorized('Invalid or expired OTP');
   }
+  // Fast path only. The authoritative cap is the conditional UPDATE below:
+  // reading here and incrementing later let concurrent guesses all observe the
+  // same count and sail past the limit together, turning a 5-attempt cap into
+  // however many requests fit in the window.
   if (otp.attempts >= MAX_ATTEMPTS) {
     recordAuthEvent('otp_verify', 'blocked', 'max_attempts');
     throw AppError.rateLimited('Too many attempts - request a new OTP');
@@ -177,11 +181,20 @@ export async function verifyOtp(
   const actual = Buffer.from(hashOtp(phone, code), 'hex');
   const okMatch = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
   if (!okMatch) {
-    // Atomic increment (DB computes) so concurrent wrong guesses can't lose updates.
-    await db
+    // Claim an attempt: increment only while under the cap, and let the row
+    // count answer whether this guess was allowed. N concurrent wrong guesses
+    // produce at most MAX_ATTEMPTS increments, because only that many UPDATEs
+    // can match - the database decides, not a value read a moment earlier.
+    const claimed = await db
       .update(otps)
       .set({ attempts: sql`${otps.attempts} + 1` })
-      .where(eq(otps.id, otp.id));
+      .where(and(eq(otps.id, otp.id), lt(otps.attempts, MAX_ATTEMPTS)))
+      .returning({ attempts: otps.attempts });
+
+    if (claimed.length === 0) {
+      recordAuthEvent('otp_verify', 'blocked', 'max_attempts');
+      throw AppError.rateLimited('Too many attempts - request a new OTP');
+    }
     recordAuthEvent('otp_verify', 'error', 'invalid_code');
     throw AppError.unauthorized('Invalid or expired OTP');
   }

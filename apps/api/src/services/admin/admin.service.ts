@@ -4,7 +4,7 @@ import { db } from '../../db/connection.js';
 import { users, admins, serviceProviders, platformSettings, vehicles, vehicleTypes } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
 import { hashPassword } from '../../lib/auth/password.js';
-import { revokeAllForUser, type SessionContext } from '../auth/session.service.js';
+import { revokeAllForUser, logAuthEvent, type SessionContext } from '../auth/session.service.js';
 import { env, channelsWithCredentials } from '../../config/env.js';
 import { invalidateOtpSettings } from '../settings/otp-settings.service.js';
 
@@ -94,7 +94,12 @@ export async function listProviders(status?: ProviderStatus) {
 
 // Give an existing user admin credentials. Separate from role assignment so the
 // password exists before the promotion, never the other way round.
-export async function setAdminPassword(targetUserId: string, password: string): Promise<void> {
+export async function setAdminPassword(
+  targetUserId: string,
+  password: string,
+  actorUserId?: string,
+  ctx: SessionContext = {},
+): Promise<void> {
   const [target] = await db.select({ id: users.id }).from(users).where(eq(users.id, targetUserId)).limit(1);
   if (!target) throw AppError.notFound('User not found');
 
@@ -113,6 +118,20 @@ export async function setAdminPassword(targetUserId: string, password: string): 
   } else {
     await db.insert(admins).values({ userId: targetUserId, passwordHash, passwordUpdatedAt: new Date() });
   }
+
+  // End the target's sessions. A reset that leaves them signed in does not do
+  // the one thing a reset is for - if the account is being reset because it was
+  // compromised, the intruder simply keeps the session they already hold.
+  await revokeAllForUser(targetUserId, 'password_reset', ctx);
+
+  // Recorded because one admin changing another's credentials is exactly the
+  // action that needs to be answerable afterwards.
+  await logAuthEvent({
+    userId: targetUserId,
+    event: 'admin_password_reset',
+    ctx,
+    meta: { byUserId: actorUserId ?? null },
+  });
 }
 
 export interface OtpSettingsPatch {

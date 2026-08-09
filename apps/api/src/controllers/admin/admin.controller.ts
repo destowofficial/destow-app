@@ -50,8 +50,9 @@ export async function setUserRoleController(req: Request, res: Response) {
 }
 
 export async function setAdminPasswordController(req: Request, res: Response) {
+  if (!req.userId) throw AppError.unauthorized();
   const { password } = parseOrThrow(setAdminPasswordBody, req.body);
-  await setAdminPassword(uuidParam(req.params.id), password);
+  await setAdminPassword(uuidParam(req.params.id), password, req.userId, contextOf(req));
   ok(res, { success: true });
 }
 

@@ -24,6 +24,14 @@ export const createBookingBody = z
     path: ['returnDatetime'],
     message: 'A round trip needs a return date',
   })
+  // A one-way trip has no return leg, so a return date is meaningless there -
+  // and worse than meaningless: the vehicle is held until that date, so a
+  // one-way booking with a date a month out took the car off the market for a
+  // month while paying a single leg.
+  .refine((b) => b.tripType === 'round_trip' || b.returnDatetime === undefined, {
+    path: ['returnDatetime'],
+    message: 'A one-way trip cannot have a return date',
+  })
   .refine(
     (b) => b.returnDatetime === undefined || b.returnDatetime.getTime() > b.pickupDatetime.getTime(),
     { path: ['returnDatetime'], message: 'Return must be after pickup' },
