@@ -13,9 +13,15 @@ interface AuthState {
   booting: boolean;
   /** Carried between the phone screen and the OTP screen. */
   pendingPhone: string;
+  /**
+   * The code, when the server chooses to echo it back. It only does that with
+   * OTP_DEV_ECHO on, which parseEnv refuses in production - so this is null in
+   * any real build and there is nothing here to leak.
+   */
+  devCode: string | null;
 
   setUser: (user: AuthUser | null) => void;
-  setPendingPhone: (phone: string) => void;
+  setPendingPhone: (phone: string, devCode?: string | null) => void;
   boot: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -24,9 +30,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   booting: true,
   pendingPhone: '',
+  devCode: null,
 
   setUser: (user) => set({ user }),
-  setPendingPhone: (pendingPhone) => set({ pendingPhone }),
+  setPendingPhone: (pendingPhone, devCode = null) => set({ pendingPhone, devCode }),
 
   boot: async () => {
     // Whatever happens, booting has to end. It gates the splash and the first
@@ -42,6 +49,6 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   signOut: async () => {
     await apiSignOut();
-    set({ user: null, pendingPhone: '' });
+    set({ user: null, pendingPhone: '', devCode: null });
   },
 }));

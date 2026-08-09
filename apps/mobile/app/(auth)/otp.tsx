@@ -14,6 +14,7 @@ const RESEND_SECONDS = 30;
 
 export default function Otp() {
   const phone = useAuthStore((st) => st.pendingPhone);
+  const devCode = useAuthStore((st) => st.devCode);
   const setUser = useAuthStore((st) => st.setUser);
 
   const [code, setCode] = useState('');
@@ -89,74 +90,86 @@ export default function Otp() {
 
       <View style={styles.body}>
         <View style={styles.brand}>
-          <Logo height={s(28)} />
+          <Logo height={s(40)} />
         </View>
 
-        <View style={styles.intro}>
-          <H1>Enter the code</H1>
-          <P style={[{ fontSize: f(14) }, styles.introText]}>
-            Sent to {pretty} · <Text style={styles.change} onPress={() => router.back()}>Change</Text>
-          </P>
-        </View>
-
-        {/* One hidden input behind six boxes: the OS keyboard and SMS
-            autofill both want a single field, and six real inputs fight it. */}
-        <Pressable
-          style={styles.boxes}
-          onPress={() => input.current?.focus()}
-          accessibilityRole="button"
-          accessibilityLabel="Enter the six digit code"
-        >
-          {boxes.map((d, i) => (
-            <View
-              key={i}
-              style={[
-                styles.box,
-                (i === code.length || (code.length === LENGTH && i === LENGTH - 1)) && styles.boxOn,
-              ]}
-            >
-              <Text style={styles.boxText}>{d}</Text>
-            </View>
-          ))}
-          <TextInput
-            ref={input}
-            value={code}
-            onChangeText={(t) => {
-              setCode(t.replace(/\D/g, '').slice(0, LENGTH));
-              setError(null);
-            }}
-            keyboardType="number-pad"
-            textContentType="oneTimeCode"
-            autoComplete="sms-otp"
-            maxLength={LENGTH}
-            autoFocus
-            style={styles.hidden}
-            accessibilityLabel="Six digit code"
-          />
-        </Pressable>
-
-        {error ? (
-          <Card tone="warn" style={styles.notice}>
-            <Text style={styles.noticeText}>
-              {error}
-              {attemptsLeft !== null
-                ? ` ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
-                : ''}
-            </Text>
-          </Card>
-        ) : null}
-
-        <View style={styles.resend}>
-          {countdown > 0 ? (
-            <P style={styles.centre}>
-              Resend code in{' '}
-              <Text style={styles.timer}>0:{String(countdown).padStart(2, '0')}</Text>
+        <View style={styles.fill}>
+          <View style={styles.intro}>
+            <H1>Enter the code</H1>
+            <P style={[{ fontSize: f(14) }, styles.introText]}>
+              Sent to {pretty} · <Text style={styles.change} onPress={() => router.back()}>Change</Text>
             </P>
-          ) : (
-            <Pressable onPress={resend} accessibilityRole="button">
-              <Text style={styles.resendLink}>Send a new code</Text>
+          </View>
+
+          {/* One hidden input behind six boxes: the OS keyboard and SMS
+              autofill both want a single field, and six real inputs fight it. */}
+          <Pressable
+            style={styles.boxes}
+            onPress={() => input.current?.focus()}
+            accessibilityRole="button"
+            accessibilityLabel="Enter the six digit code"
+          >
+            {boxes.map((d, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.box,
+                  (i === code.length || (code.length === LENGTH && i === LENGTH - 1)) && styles.boxOn,
+                ]}
+              >
+                <Text style={styles.boxText}>{d}</Text>
+              </View>
+            ))}
+            <TextInput
+              ref={input}
+              value={code}
+              onChangeText={(t) => {
+                setCode(t.replace(/\D/g, '').slice(0, LENGTH));
+                setError(null);
+              }}
+              keyboardType="number-pad"
+              textContentType="oneTimeCode"
+              autoComplete="sms-otp"
+              maxLength={LENGTH}
+              autoFocus
+              style={styles.hidden}
+              accessibilityLabel="Six digit code"
+            />
+          </Pressable>
+
+          {devCode ? (
+            <Pressable onPress={() => setCode(devCode)} accessibilityRole="button">
+              <Card tone="blue" style={styles.dev}>
+                <Text style={styles.devLabel}>Development server</Text>
+                <Text style={styles.devCode}>{devCode}</Text>
+                <Text style={styles.devHint}>Tap to fill</Text>
+              </Card>
             </Pressable>
-          )}
+          ) : null}
+
+          {error ? (
+            <Card tone="warn" style={styles.notice}>
+              <Text style={styles.noticeText}>
+                {error}
+                {attemptsLeft !== null
+                  ? ` ${attemptsLeft} attempt${attemptsLeft === 1 ? '' : 's'} left.`
+                  : ''}
+              </Text>
+            </Card>
+          ) : null}
+
+          <View style={styles.resend}>
+            {countdown > 0 ? (
+              <P style={styles.centre}>
+                Resend code in{' '}
+                <Text style={styles.timer}>0:{String(countdown).padStart(2, '0')}</Text>
+              </P>
+            ) : (
+              <Pressable onPress={resend} accessibilityRole="button">
+                <Text style={styles.resendLink}>Send a new code</Text>
+              </Pressable>
+            )}
+        </View>
         </View>
       </View>
 
@@ -177,14 +190,11 @@ const styles = StyleSheet.create({
   chev: { fontSize: f(30), lineHeight: f(30), color: color.ink },
   // Same reasoning as the phone screen: six boxes and a countdown do not fill a
   // phone, so they sit in the middle rather than clinging to the top.
-  body: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: s(18),
-    paddingBottom: s(40),
-    gap: s(22),
-  },
-  brand: { alignItems: 'center', marginBottom: s(6) },
+  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(30) },
+  // The wordmark sits at the top; everything else centres in the space below
+  // it, so the screen reads as branded rather than as one floating block.
+  fill: { flex: 1, justifyContent: 'center', paddingBottom: s(48), gap: s(22) },
+  brand: { alignItems: 'center' },
   intro: { gap: s(7), alignItems: 'center' },
   change: { color: color.blue, fontWeight: weight.bold },
   introText: { textAlign: 'center' },
@@ -211,4 +221,23 @@ const styles = StyleSheet.create({
   centre: { textAlign: 'center' },
   timer: { color: color.ink, fontWeight: weight.bold },
   resendLink: { fontSize: f(13), color: color.blue, fontWeight: weight.bold },
+  // Only ever rendered when the API echoes the code back, which it does solely
+  // with OTP_DEV_ECHO on - a flag parseEnv refuses to accept in production.
+  dev: { alignItems: 'center', paddingVertical: s(12) },
+  devLabel: {
+    fontSize: f(10),
+    fontWeight: weight.bold,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: color.blueDark,
+  },
+  devCode: {
+    fontSize: f(28),
+    fontWeight: weight.black,
+    color: color.blueDark,
+    letterSpacing: 6,
+    marginTop: s(4),
+    fontVariant: ['tabular-nums'],
+  },
+  devHint: { fontSize: f(11), color: color.blueDark, opacity: 0.7, marginTop: s(2) },
 });

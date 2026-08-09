@@ -38,8 +38,10 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await requestOtp(digits);
-      setPendingPhone(digits);
+      const sent = await requestOtp(digits);
+      // devCode is present only when the server is running with OTP_DEV_ECHO,
+      // which it refuses to do in production.
+      setPendingPhone(digits, sent.devCode ?? null);
       router.push('/(auth)/otp');
     } catch (e) {
       if (e instanceof NetworkError) {
@@ -64,47 +66,49 @@ export default function Login() {
       >
         <View style={styles.body}>
           <View style={styles.brand}>
-            <Logo height={s(32)} />
+            <Logo height={s(46)} />
           </View>
 
-          <View style={styles.intro}>
-            <H1>Your number</H1>
-            <P style={[{ fontSize: f(14) }, styles.introText]}>
-              We&apos;ll text you a six-digit code to confirm it.
-            </P>
-          </View>
-
-          <View style={[styles.entry, digits.length > 0 && styles.entryFocused]}>
-            <Text style={styles.country}>🇮🇳 +91</Text>
-            <View style={styles.entryDivider} />
-            <TextInput
-              value={digits}
-              onChangeText={(t) => {
-                setDigits(t.replace(/\D/g, '').slice(0, 10));
-                setError(null);
-              }}
-              keyboardType="number-pad"
-              textContentType="telephoneNumber"
-              autoComplete="tel"
-              placeholder="98765 43210"
-              placeholderTextColor={color.dim}
-              style={styles.input}
-              maxLength={10}
-              autoFocus
-              accessibilityLabel="Mobile number"
-            />
-          </View>
-
-          {error ? (
-            <Text style={styles.error}>{error}</Text>
-          ) : (
-            <View style={styles.reassure}>
-              <Icon name="shield" size={14} color={color.dim} />
-              <Small style={styles.reassureText}>
-                Your number is used to sign you in and to let the driver reach you. Nothing else.
-              </Small>
+          <View style={styles.fill}>
+            <View style={styles.intro}>
+              <H1>Your number</H1>
+              <P style={[{ fontSize: f(14) }, styles.introText]}>
+                We&apos;ll text you a six-digit code to confirm it.
+              </P>
             </View>
-          )}
+
+            <View style={[styles.entry, digits.length > 0 && styles.entryFocused]}>
+              <Text style={styles.country}>🇮🇳 +91</Text>
+              <View style={styles.entryDivider} />
+              <TextInput
+                value={digits}
+                onChangeText={(t) => {
+                  setDigits(t.replace(/\D/g, '').slice(0, 10));
+                  setError(null);
+                }}
+                keyboardType="number-pad"
+                textContentType="telephoneNumber"
+                autoComplete="tel"
+                placeholder="98765 43210"
+                placeholderTextColor={color.dim}
+                style={styles.input}
+                maxLength={10}
+                autoFocus
+                accessibilityLabel="Mobile number"
+              />
+            </View>
+
+            {error ? (
+              <Text style={styles.error}>{error}</Text>
+            ) : (
+              <View style={styles.reassure}>
+                <Icon name="shield" size={14} color={color.dim} />
+                <Small style={styles.reassureText}>
+                  Your number is used to sign you in and to let the driver reach you. Nothing else.
+                </Small>
+              </View>
+            )}
+          </View>
         </View>
 
         <Footer>
@@ -123,14 +127,11 @@ const styles = StyleSheet.create({
   // Centred rather than top-aligned. There are three things on this screen and
   // stacking them under the notch leaves the bottom two thirds empty, which
   // reads as an unfinished screen rather than a calm one.
-  body: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: s(18),
-    paddingBottom: s(40),
-    gap: s(22),
-  },
-  brand: { alignItems: 'center', marginBottom: s(6) },
+  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(34) },
+  // The wordmark sits at the top; everything else centres in the space below
+  // it, so the screen reads as branded rather than as one floating block.
+  fill: { flex: 1, justifyContent: 'center', paddingBottom: s(48), gap: s(26) },
+  brand: { alignItems: 'center' },
   introText: { textAlign: 'center' },
   intro: { gap: s(7), alignItems: 'center' },
   entry: {
