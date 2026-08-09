@@ -2,14 +2,15 @@
 // Postgres (db-test) and Redis - excluded from the default `bun test` by the
 // .itest.ts name; run via `bun run test:integration` (which wires the env).
 import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
-import { eq, sql, and, notInArray } from 'drizzle-orm';
+import { eq, sql, and, desc, notInArray } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
+import { createBookingBody } from '@destow/contracts';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes, bookings, serviceProviders, cities,
+  vehicles, vehicleTypes, bookings, serviceProviders, cities, otps, authEvents,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -1994,4 +1995,80 @@ test('an overpayment is flagged rather than accepted', async () => {
   const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
   expect(result.handled).toBe(false);
   expect((await getMyBooking(customer.id, booking.id)).paymentStatus).toBe('pending');
+});
+
+// --- Attempt cap, holds and reset (#35, #36, #50) -----------------------------
+
+// Reading the count and incrementing later let concurrent guesses all observe
+// the same value and pass the cap together.
+test('concurrent wrong OTP guesses cannot exceed the attempt cap', async () => {
+  const phone = '+919333000001';
+  await issueOtp(phone);
+
+  // Ten simultaneous wrong guesses against a cap of five.
+  await Promise.allSettled(
+    Array.from({ length: 10 }, () => verifyOtp(phone, '000000', 'customer_app', ctx)),
+  );
+
+  const [row] = await db
+    .select()
+    .from(otps)
+    .where(eq(otps.phone, phone))
+    .orderBy(desc(otps.createdAt))
+    .limit(1);
+  expect(row.attempts).toBeLessThanOrEqual(5);
+});
+
+test('the correct code still works below the cap', async () => {
+  const phone = '+919333000002';
+  const { code } = await issueOtp(phone);
+  await expectReject(verifyOtp(phone, '000000', 'customer_app', ctx), 401);
+  const result = await verifyOtp(phone, code, 'customer_app', ctx);
+  expect(result.user.phone).toBe(phone);
+});
+
+// A one-way trip has no return leg, so a return date there only served to hold
+// the vehicle off the market while paying for a single leg.
+test('a one-way booking cannot carry a return date', () => {
+  const r = createBookingBody.safeParse({
+    vehicleId: '00000000-0000-0000-0000-000000000000',
+    from: 'Delhi',
+    to: 'Agra',
+    pickupDatetime: new Date(Date.now() + 86_400_000),
+    tripType: 'one_way',
+    returnDatetime: new Date(Date.now() + 30 * 86_400_000),
+  });
+  expect(r.success).toBe(false);
+});
+
+// A reset that leaves the target signed in does not do the one thing a reset is
+// for: an intruder simply keeps the session they already hold.
+test('an admin password reset ends the target sessions', async () => {
+  const actor = await makeAdmin('reset-actor@destow.in');
+  const target = await makeAdmin('reset-target@destow.in');
+  const s = await createSession({ userId: target.id, role: 'admin', client: 'admin_web', ctx });
+
+  await setAdminPassword(target.id, 'a completely new password', actor.id, ctx);
+
+  const [sess] = await db.select().from(sessions).where(eq(sessions.id, s.sessionId));
+  expect(sess.revokedAt).not.toBeNull();
+  expect(sess.revokedReason).toBe('password_reset');
+  await expectReject(rotateRefresh(s.refreshToken, ctx), 401);
+});
+
+test('the reset is recorded against the admin who made it', async () => {
+  const actor = await makeAdmin('audit-actor@destow.in');
+  const target = await makeAdmin('audit-target@destow.in');
+  await setAdminPassword(target.id, 'another completely new one', actor.id, ctx);
+
+  // makeAdmin sets the initial password through the same path, which is itself
+  // a reset and is logged - so assert on the most recent event rather than
+  // assuming this is the only one.
+  const events = await db
+    .select()
+    .from(authEvents)
+    .where(and(eq(authEvents.userId, target.id), eq(authEvents.event, 'admin_password_reset')))
+    .orderBy(desc(authEvents.createdAt));
+  expect(events.length).toBeGreaterThanOrEqual(1);
+  expect((events[0].meta as { byUserId?: string }).byUserId).toBe(actor.id);
 });
