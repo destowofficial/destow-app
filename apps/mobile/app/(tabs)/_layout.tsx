@@ -1,14 +1,23 @@
 import React from 'react';
 import { View, StyleSheet, type ColorValue } from 'react-native';
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
+import { useAuthStore } from '../../stores/useAuthStore';
 
 // Three destinations, which is the whole app: find a trip, look at your trips,
 // and everything else. Auth routing lives in the root layout rather than here,
 // so a redirect never races the tab navigator mounting.
 export default function TabsLayout() {
+  const booting = useAuthStore((st) => st.booting);
+  const user = useAuthStore((st) => st.user);
+
+  // Declarative rather than an effect: signing out has to leave immediately,
+  // and a <Redirect> inside the navigator cannot fire before it is mounted.
+  if (booting) return null;
+  if (!user) return <Redirect href="/(auth)/login" />;
+
   return (
     <Tabs
       screenOptions={{
