@@ -76,16 +76,18 @@ test('a quote prices the round trip', async () => {
 
 test('a booking is created and comes back in the list', async () => {
   const listing = await api.listAvailableVehicles({ from: 'Delhi', to: 'Manali' });
-  // A window unique to this run. The database refuses to double-book a vehicle
-  // across overlapping dates, so a fixed pickup would make the second run of
-  // this file fail against the first run's booking - the constraint working,
-  // not a bug.
-  const offsetHours = 30 * 24 + (Date.now() % 4000);
+  // A window and a vehicle unique to this run. The database refuses to
+  // double-book a vehicle across overlapping dates, so a fixed pickup on the
+  // cheapest car makes every run after the first collide with the one before -
+  // the constraint working, not a bug. The booking is cancelled at the end of
+  // the file so the hold does not survive the run either.
+  const offsetHours = 30 * 24 + (Date.now() % 20_000);
   const pickup = new Date(Date.now() + offsetHours * 3600 * 1000);
   const back = new Date(pickup.getTime() + 3 * 24 * 3600 * 1000);
+  const pick = listing.vehicles[Date.now() % listing.vehicles.length];
 
   const booking = await api.createBooking({
-    vehicleId: listing.vehicles[0].vehicleId,
+    vehicleId: pick.vehicleId,
     from: 'Delhi',
     to: 'Manali',
     pickupDatetime: pickup,
@@ -130,6 +132,14 @@ test('an expired access token is refreshed and the request retried', async () =>
   session.setAccessToken('not-a-real-token');
   const me = await api.getMe();
   expect(me.phone).toBe(`+91${PHONE}`);
+});
+
+// Leaves nothing behind: a live booking holds its vehicle against the
+// no-overlap constraint, and a file that accumulates holds poisons its own next
+// run rather than the code being wrong.
+test('the booking is released so the next run has a free vehicle', async () => {
+  const cancelled = await api.cancelBooking(bookingId);
+  expect(cancelled.status).toBe('cancelled');
 });
 
 test('signing out clears the keychain', async () => {
