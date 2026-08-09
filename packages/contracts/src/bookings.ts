@@ -2,40 +2,50 @@ import { z } from 'zod';
 import { TRIP_TYPE, BOOKING_STATUS, PAYMENT_STATUS } from './enums';
 
 // What a customer sends to book. Note what is absent: distance, price, fare.
-// The server resolves the vehicle, re-resolves the distance and recomputes the
-// fare, then freezes the result. There is no number here that reaches money.
+// The server resolves the vehicle, routes the distance and computes the
+// estimate itself. There is no number here that reaches money.
+//
+// Destow sells outstation round trips only - the vehicle and driver stay with
+// the customer for the whole trip and bring them back - so a return date is
+// required rather than optional. `tripType` survives as a literal so the column
+// and every historic row keep their meaning, but one_way is not bookable.
 export const createBookingBody = z
   .object({
     vehicleId: z.string().uuid(),
     from: z.string().trim().min(2).max(160),
     to: z.string().trim().min(2).max(160),
     pickupDatetime: z.coerce.date(),
-    tripType: z.enum(TRIP_TYPE).default('one_way'),
-    returnDatetime: z.coerce.date().optional(),
+    tripType: z.literal('round_trip').default('round_trip'),
+    returnDatetime: z.coerce.date(),
   })
   .refine((b) => b.pickupDatetime.getTime() > Date.now(), {
     path: ['pickupDatetime'],
     message: 'Pickup must be in the future',
   })
-  // A round trip with no return date is not a round trip, and a return before
-  // pickup is a data-entry error that would otherwise sit in the booking
-  // silently until a driver turned up on the wrong day.
-  .refine((b) => b.tripType !== 'round_trip' || b.returnDatetime !== undefined, {
+  // A return before pickup is a data-entry error that would otherwise sit in
+  // the booking silently until a driver turned up on the wrong day. It also
+  // sets occupied_until, so a bad value corrupts vehicle availability.
+  .refine((b) => b.returnDatetime.getTime() > b.pickupDatetime.getTime(), {
     path: ['returnDatetime'],
-    message: 'A round trip needs a return date',
+    message: 'Return must be after pickup',
+  });
+
+// What a partner submits when the vehicle comes back, and the only input that
+// decides what the customer is charged.
+//
+// Two readings rather than one "kilometres run" total: a single figure is a box
+// a driver can type anything into, whereas two odometer readings can be checked
+// against each other, against the routed estimate, and - crucially - shown to
+// the customer to verify before any money moves.
+export const submitOdometerBody = z
+  .object({
+    odometerStartKm: z.number().int().min(0).max(9_999_999),
+    odometerEndKm: z.number().int().min(0).max(9_999_999),
   })
-  // A one-way trip has no return leg, so a return date is meaningless there -
-  // and worse than meaningless: the vehicle is held until that date, so a
-  // one-way booking with a date a month out took the car off the market for a
-  // month while paying a single leg.
-  .refine((b) => b.tripType === 'round_trip' || b.returnDatetime === undefined, {
-    path: ['returnDatetime'],
-    message: 'A one-way trip cannot have a return date',
-  })
-  .refine(
-    (b) => b.returnDatetime === undefined || b.returnDatetime.getTime() > b.pickupDatetime.getTime(),
-    { path: ['returnDatetime'], message: 'Return must be after pickup' },
-  );
+  .refine((b) => b.odometerEndKm > b.odometerStartKm, {
+    path: ['odometerEndKm'],
+    message: 'The closing reading must be higher than the opening one',
+  });
 
 export const listBookingsQuery = z.object({
   status: z.enum(BOOKING_STATUS).optional(),
@@ -52,13 +62,28 @@ export interface CustomerBooking {
   paymentStatus: (typeof PAYMENT_STATUS)[number];
   from: string;
   to: string;
+  // The routed distance for the round trip, resolved at booking. This is the
+  // estimate the quote was built from, not what the customer is billed for.
   distanceM: number;
   tripType: (typeof TRIP_TYPE)[number];
   pickupDatetime: string;
   returnDatetime: string | null;
   pricePerKmPaise: number;
+  // What this booking currently costs: the estimate until the distance is
+  // confirmed, the recomputed figure afterwards. Payments reconcile against it.
   totalFarePaise: number;
   totalFareDisplay: string;
+  // The original quote, frozen and never rewritten, so "quoted vs charged" can
+  // always be shown - including when the two differ, which is the normal case.
+  estimatedFarePaise: number;
+  estimatedFareDisplay: string;
+  // --- Set when the partner submits the odometer, null until the trip ends ---
+  odometerStartKm: number | null;
+  odometerEndKm: number | null;
+  actualDistanceM: number | null;
+  distanceSubmittedAt: string | null;
+  // Set when the customer approves that distance. Nothing is charged before it.
+  distanceConfirmedAt: string | null;
   vehicleTypeName: string;
   modelName: string | null;
   registrationNo: string | null;
@@ -78,3 +103,4 @@ export interface Paginated<T> {
 
 export type CreateBookingBody = z.infer<typeof createBookingBody>;
 export type ListBookingsQuery = z.infer<typeof listBookingsQuery>;
+export type SubmitOdometerBody = z.infer<typeof submitOdometerBody>;

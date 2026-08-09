@@ -231,12 +231,32 @@ export const bookings = pgTable(
     // to build a tstzrange from. One-way trips occupy the vehicle for the drive
     // time; a round trip until the customer brings it back.
     occupiedUntil: timestamp('occupied_until', { withTimezone: true }).notNull(),
-    // -- Fare snapshot (frozen at creation so config changes never rewrite history) --
+    // -- Fare (rate and commission frozen at creation; the amount is not) -------
+    // Destow bills the distance actually driven, so the fare is an estimate
+    // until the vehicle comes back. price_per_km and commission_bps are frozen
+    // at creation - a later price or commission change must never rewrite a
+    // trip already sold - but total_fare_paise is recomputed once, when the
+    // customer confirms the odometer, and the commission split with it.
     pricePerKmPaise: integer('price_per_km_paise').notNull(),
+    // What this booking currently costs. The estimate until confirmation, the
+    // billed figure afterwards. Payments reconcile webhooks against this.
     totalFarePaise: integer('total_fare_paise').notNull(),
+    // The original quote, written once and never again, so "quoted vs charged"
+    // survives the recompute. Nullable only for rows that predate this column.
+    estimatedFarePaise: integer('estimated_fare_paise'),
     commissionBps: integer('commission_bps').notNull(),
     commissionPaise: integer('commission_paise').notNull(),
     providerPayoutPaise: integer('provider_payout_paise').notNull(),
+    // -- Metered distance ------------------------------------------------------
+    // Two readings, not a total: a lone "km run" field is unverifiable, whereas
+    // these can be checked against each other and shown to the customer.
+    odometerStartKm: integer('odometer_start_km'),
+    odometerEndKm: integer('odometer_end_km'),
+    actualDistanceM: integer('actual_distance_m'),
+    distanceSubmittedAt: timestamp('distance_submitted_at', { withTimezone: true }),
+    // The customer's approval. Money moves only after this is set, so it is the
+    // gate between "the driver says" and "the card is charged".
+    distanceConfirmedAt: timestamp('distance_confirmed_at', { withTimezone: true }),
     status: bookingStatusEnum('status').notNull().default('pending'),
     paymentStatus: paymentStatusEnum('payment_status').notNull().default('pending'),
     paymentMethod: paymentMethodEnum('payment_method'),

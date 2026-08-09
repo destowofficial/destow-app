@@ -4,7 +4,7 @@
 import { test, expect, afterAll, afterEach, beforeAll } from 'bun:test';
 import { eq, sql, and, desc, notInArray } from 'drizzle-orm';
 import { decodeJwt } from 'jose';
-import { createBookingBody } from '@destow/contracts';
+import { createBookingBody, submitOdometerBody } from '@destow/contracts';
 import { db, pool } from '@/db/connection.js';
 import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
@@ -41,6 +41,7 @@ import {
   getMyBooking,
   listMyBookings,
   cancelMyBooking,
+  confirmTripDistance,
 } from '@/services/bookings/bookings.service.js';
 import {
   startPayment,
@@ -68,6 +69,18 @@ import {
   createDriver,
   updateDriver,
 } from '@/services/providers/fleet.service.js';
+
+// Destow sells round trips only, so every booking needs a return. Derived from
+// the pickup rather than a fixed date, because these tests book anywhere from
+// tomorrow to months out.
+const RETURN_AFTER = (pickup: Date) => new Date(pickup.getTime() + 3 * 86_400_000);
+
+// A plausible odometer pair for a trip, scaled to that booking's own estimate so
+// it stays inside the sanity bound completeTrip enforces.
+const ODO = (b: { distanceM: number }) => ({
+  odometerStartKm: 40_000,
+  odometerEndKm: 40_000 + Math.round(b.distanceM / 1000),
+});
 
 // Clean slate each run so tests are independent and repeatable. Guarded so this
 // can only ever run against the ephemeral test database - never dev/prod.
@@ -658,7 +671,8 @@ test('available vehicles are priced by the server from the resolved distance', a
   const mine = listed.find((v) => v.vehicleId === vehicle.id);
   expect(mine).toBeDefined();
   // total = price_per_km * distance, in integer paise.
-  expect(mine!.totalFarePaise).toBe(Math.round((1300 * route.distanceM) / 1000));
+  // Both legs: the vehicle drives the route out and back.
+  expect(mine!.totalFarePaise).toBe(Math.round((1300 * route.distanceM * 2) / 1000));
   expect(mine!.pricePerKmPaise).toBe(1300);
   expect(mine!.totalFareDisplay).toMatch(/^₹/);
 });
@@ -833,7 +847,7 @@ test('a vehicle becomes bookable only after both approvals', async () => {
   const now = await listAvailableVehicles('Delhi', 'Agra');
   const listed = now.vehicles.find((x) => x.vehicleId === v.id);
   expect(listed).toBeDefined();
-  expect(listed!.totalFarePaise).toBe(Math.round((1200 * now.route.distanceM) / 1000));
+  expect(listed!.totalFarePaise).toBe(Math.round((1200 * now.route.distanceM * 2) / 1000));
 });
 
 // --- Bookings -----------------------------------------------------------------
@@ -873,14 +887,16 @@ test('a booking freezes the fare the server computed', async () => {
     from: 'Delhi',
     to: 'Agra',
     pickupDatetime: TOMORROW(),
-    tripType: 'one_way',
+    returnDatetime: RETURN_AFTER(TOMORROW()),
+    tripType: 'round_trip',
   });
 
   expect(b.status).toBe('pending');
   expect(b.paymentStatus).toBe('pending');
-  expect(b.distanceM).toBe(route.distanceM);
+  // The charged distance is the round trip, not the one-way route.
+  expect(b.distanceM).toBe(route.distanceM * 2);
   expect(b.pricePerKmPaise).toBe(1300);
-  expect(b.totalFarePaise).toBe(Math.round((1300 * route.distanceM) / 1000));
+  expect(b.totalFarePaise).toBe(Math.round((1300 * route.distanceM * 2) / 1000));
 
   // The commission side is stored but never shown to the customer.
   const [row] = await db.select().from(bookings).where(eq(bookings.id, b.id));
@@ -898,7 +914,8 @@ test('changing the vehicle price later does not alter an existing booking', asyn
     from: 'Delhi',
     to: 'Agra',
     pickupDatetime: TOMORROW(),
-    tripType: 'one_way',
+    returnDatetime: RETURN_AFTER(TOMORROW()),
+    tripType: 'round_trip',
   });
   const agreed = b.totalFarePaise;
 
@@ -913,7 +930,7 @@ test('a customer never sees commission on their own booking', async () => {
   const customer = await createUser();
   const { vehicle } = await bookableVehicle(1200);
   const b = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   for (const field of ['commissionPaise', 'providerPayoutPaise', 'commissionBps']) {
     expect(b).not.toHaveProperty(field);
@@ -929,7 +946,7 @@ test('a vehicle deactivated after the quote cannot be booked', async () => {
   await updateVehicle(owner.id, vehicle.id, { isActive: false });
   await expectReject(
     createBooking(customer.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
     }),
     409,
   );
@@ -947,7 +964,7 @@ test('a pending provider vehicle cannot be booked', async () => {
     .returning();
   await expectReject(
     createBooking(customer.id, {
-      vehicleId: v.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+      vehicleId: v.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
     }),
     409,
   );
@@ -958,7 +975,7 @@ test('a customer cannot read another customer booking', async () => {
   const bob = await createUser();
   const { vehicle } = await bookableVehicle(1000);
   const b = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   await expectReject(getMyBooking(bob.id, b.id), 404);
 });
@@ -976,7 +993,8 @@ test('history paginates with a real total and a working status filter', async ()
       from: 'Delhi',
       to: 'Agra',
       pickupDatetime: new Date(Date.now() + i * 7 * 24 * 3600 * 1000),
-      tripType: 'one_way',
+      returnDatetime: RETURN_AFTER(new Date(Date.now() + i * 7 * 24 * 3600 * 1000)),
+      tripType: 'round_trip',
     });
   }
 
@@ -1003,7 +1021,7 @@ async function bookedTrip(pricePerKmPaise = 1300) {
   const { owner, provider, vehicle } = await bookableVehicle(pricePerKmPaise);
   const driver = await createDriver(owner.id, { name: 'Rajesh', phone: '9876500099' });
   const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: TOMORROW(), returnDatetime: RETURN_AFTER(TOMORROW()), tripType: 'round_trip',
   });
   return { customer, owner, provider, vehicle, driver, booking };
 }
@@ -1027,7 +1045,7 @@ test('the full lifecycle runs and commission accrues only on completion', async 
   // Still nothing earned - the trip is running but not finished.
   expect((await getEarnings(owner.id)).completedTrips).toBe(0);
 
-  const done = await completeTrip(owner.id, booking.id);
+  const done = await completeTrip(owner.id, booking.id, ODO(booking));
   expect(done.status).toBe('completed');
   expect(done.completedAt).not.toBeNull();
 
@@ -1047,9 +1065,9 @@ test('the full lifecycle runs and commission accrues only on completion', async 
 // that never ran.
 test('a booking cannot skip straight to completed', async () => {
   const { owner, booking } = await bookedTrip();
-  await expectReject(completeTrip(owner.id, booking.id), 409);
+  await expectReject(completeTrip(owner.id, booking.id, ODO(booking)), 409);
   await acceptBooking(owner.id, booking.id);
-  await expectReject(completeTrip(owner.id, booking.id), 409); // still not started
+  await expectReject(completeTrip(owner.id, booking.id, ODO(booking)), 409); // still not started
 });
 
 test('completing twice does not accrue commission twice', async () => {
@@ -1057,10 +1075,10 @@ test('completing twice does not accrue commission twice', async () => {
   await acceptBooking(owner.id, booking.id);
   await assignDriver(owner.id, booking.id, driver.id);
   await startTrip(owner.id, booking.id);
-  await completeTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id, ODO(booking));
   await db.update(bookings).set({ paymentStatus: 'paid' }).where(eq(bookings.id, booking.id));
 
-  await expectReject(completeTrip(owner.id, booking.id), 409);
+  await expectReject(completeTrip(owner.id, booking.id, ODO(booking)), 409);
 
   const earnings = await getEarnings(owner.id);
   expect(earnings.completedTrips).toBe(1);
@@ -1072,7 +1090,7 @@ test('a partner cannot act on another partner booking', async () => {
   const other = await createUser();
   await registerProvider(other.id, AGENCY, ctx);
   await expectReject(acceptBooking(other.id, booking.id), 404);
-  await expectReject(completeTrip(other.id, booking.id), 404);
+  await expectReject(completeTrip(other.id, booking.id, ODO(booking)), 404);
 });
 
 // Assigning someone else's driver would hand their personal number to a
@@ -1153,12 +1171,12 @@ test('the same vehicle cannot be booked for overlapping dates', async () => {
   const pickup = AT(48);
 
   await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   await expectReject(
     createBooking(bob.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -1171,12 +1189,12 @@ test('the same vehicle can be booked once the first trip is over', async () => {
   const bob = await createUser();
 
   const first = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(48), tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(48), returnDatetime: RETURN_AFTER(AT(48)), tripType: 'round_trip',
   });
 
   // Well clear of the first trip's drive time.
   const later = await createBooking(bob.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(24 * 14), tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: AT(24 * 14), returnDatetime: RETURN_AFTER(AT(24 * 14)), tripType: 'round_trip',
   });
   expect(later.id).not.toBe(first.id);
 });
@@ -1190,11 +1208,11 @@ test('cancelling releases the vehicle for someone else', async () => {
   const pickup = AT(72);
 
   const first = await createBooking(alice.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   await expectReject(
     createBooking(bob.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
@@ -1202,7 +1220,7 @@ test('cancelling releases the vehicle for someone else', async () => {
   await cancelMyBooking(alice.id, first.id);
 
   const second = await createBooking(bob.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(second.status).toBe('pending');
 });
@@ -1216,10 +1234,10 @@ test('another vehicle is unaffected by the first being held', async () => {
   const pickup = AT(96);
 
   await createBooking(alice.id, {
-    vehicleId: a.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: a.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   const other = await createBooking(bob.id, {
-    vehicleId: b.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: b.vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(other.status).toBe('pending');
 });
@@ -1231,7 +1249,10 @@ test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
   const alice = await createUser();
   const bob = await createUser();
   const pickup = AT(120);
-  const trip = { from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way' } as const;
+  const trip = {
+    from: 'Delhi', to: 'Agra', pickupDatetime: pickup,
+    returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  } as const;
 
   const results = await Promise.allSettled([
     createBooking(alice.id, { vehicleId: vehicle.id, ...trip }),
@@ -1257,16 +1278,39 @@ test('two simultaneous bookings of one vehicle: exactly one wins', async () => {
 
 async function payableBooking(pricePerKmPaise = 1300) {
   const customer = await createUser();
-  const { vehicle } = await bookableVehicle(pricePerKmPaise);
-  const booking = await createBooking(customer.id, {
+  const { vehicle, owner } = await bookableVehicle(pricePerKmPaise);
+  const pickup = new Date(Date.now() + 200 * 3600 * 1000);
+  const booked = await createBooking(customer.id, {
     vehicleId: vehicle.id,
     from: 'Delhi',
     to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 200 * 3600 * 1000),
-    tripType: 'one_way',
+    pickupDatetime: pickup,
+    returnDatetime: RETURN_AFTER(pickup),
+    tripType: 'round_trip',
   });
-  return { customer, booking };
+
+  // Nothing is payable until the trip has run and the customer has agreed the
+  // odometer, so a "payable booking" now means one driven to that point. The
+  // reading is set to exactly the estimate, which keeps the amount identical to
+  // the quote and leaves these tests about payment rather than about metering.
+  const driver = await createDriver(owner.id, {
+    name: 'Rajesh',
+    phone: `98765${String(driverSeq++).padStart(5, '0')}`,
+  });
+  await acceptBooking(owner.id, booked.id);
+  await assignDriver(owner.id, booked.id, driver.id);
+  await startTrip(owner.id, booked.id);
+  await completeTrip(owner.id, booked.id, {
+    odometerStartKm: 20_000,
+    odometerEndKm: 20_000 + Math.round(booked.distanceM / 1000),
+  });
+  const booking = await confirmTripDistance(customer.id, booked.id);
+  return { customer, owner, booking };
 }
+
+// Driver phone numbers are unique, and this fixture runs on nearly every
+// payment test.
+let driverSeq = 10_000;
 
 test('the payment order is for the frozen fare, not anything the client sends', async () => {
   const { customer, booking } = await payableBooking(1300);
@@ -1361,9 +1405,30 @@ test('a customer cannot pay for another customer booking', async () => {
 });
 
 test('a cancelled booking cannot be paid', async () => {
-  const { customer, booking } = await payableBooking();
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(300);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
   await cancelMyBooking(customer.id, booking.id);
   await expectReject(startPayment(customer.id, booking.id), 409);
+});
+
+// The other side of the same gate: a trip that has run but whose distance the
+// customer has not agreed yet has no settled amount, so there is nothing to
+// open an order for. Charging here would take the estimate.
+test('a trip cannot be paid before the distance is confirmed', async () => {
+  const { customer, owner, booking } = await drivenTrip();
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 70_000, odometerEndKm: 70_000 + Math.round(booking.distanceM / 1000),
+  });
+  await expectReject(startPayment(customer.id, booking.id), 409);
+
+  await confirmTripDistance(customer.id, booking.id);
+  const intent = await startPayment(customer.id, booking.id);
+  expect(intent.orderId).toMatch(/^order_/);
 });
 
 // The net for a customer whose app died mid-checkout after their money moved.
@@ -1446,12 +1511,13 @@ async function completedTrip(pricePerKmPaise = 1000) {
     from: 'Delhi',
     to: 'Agra',
     pickupDatetime: new Date(Date.now() + 300 * 3600 * 1000),
-    tripType: 'one_way',
+    returnDatetime: RETURN_AFTER(new Date(Date.now() + 300 * 3600 * 1000)),
+    tripType: 'round_trip',
   });
   await acceptBooking(owner.id, booking.id);
   await assignDriver(owner.id, booking.id, driver.id);
   await startTrip(owner.id, booking.id);
-  await completeTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id, ODO(booking));
   return { customer, owner, provider, booking };
 }
 
@@ -1492,7 +1558,7 @@ test('only a completed trip can be rated', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 400 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: new Date(Date.now() + 400 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 400 * 3600 * 1000)), tripType: 'round_trip',
   });
   await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
 });
@@ -1502,7 +1568,7 @@ test('a cancelled trip cannot be rated', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 500 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: new Date(Date.now() + 500 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 500 * 3600 * 1000)), tripType: 'round_trip',
   });
   await cancelMyBooking(customer.id, booking.id);
   await expectReject(rateBooking(customer.id, booking.id, { rating: 1 }), 409);
@@ -1557,12 +1623,12 @@ test('ratings across several trips accumulate correctly', async () => {
     const customer = await createUser();
     const booking = await createBooking(customer.id, {
       vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-      pickupDatetime: new Date(Date.now() + (600 + i * 100) * 3600 * 1000), tripType: 'one_way',
+      pickupDatetime: new Date(Date.now() + (600 + i * 100) * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + (600 + i * 100) * 3600 * 1000)), tripType: 'round_trip',
     });
     await acceptBooking(owner.id, booking.id);
     await assignDriver(owner.id, booking.id, driver.id);
     await startTrip(owner.id, booking.id);
-    await completeTrip(owner.id, booking.id);
+    await completeTrip(owner.id, booking.id, ODO(booking));
     await rateBooking(customer.id, booking.id, { rating: score });
   }
 
@@ -1592,13 +1658,23 @@ async function paidBooking(hoursToPickup: number, pricePerKmPaise = 1000) {
     from: 'Delhi',
     to: 'Agra',
     pickupDatetime: new Date(Date.now() + hoursToPickup * 3600 * 1000),
-    tripType: 'one_way',
+    returnDatetime: RETURN_AFTER(new Date(Date.now() + hoursToPickup * 3600 * 1000)),
+    tripType: 'round_trip',
   });
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = `pay_${booking.id.slice(0, 8)}`;
-  await confirmPayment(customer.id, booking.id, {
-    orderId, paymentId, signature: stubSignature(orderId, paymentId),
-  });
+  // Settled directly rather than through startPayment. Under postpaid billing
+  // nothing is payable until the trip has run and the customer has agreed the
+  // odometer, and a completed trip cannot then be cancelled - so this state is
+  // unreachable through the normal flow. The refund path still has to work,
+  // because money captured out of band or before the switch to metered billing
+  // must come back when a trip is called off.
+  await db
+    .update(bookings)
+    .set({
+      paymentStatus: 'paid',
+      transactionRef: `pay_${booking.id.slice(0, 8)}`,
+      paidAt: new Date(),
+    })
+    .where(eq(bookings.id, booking.id));
   return { customer, booking };
 }
 
@@ -1663,14 +1739,42 @@ test('an unpaid booking cancels with no refund recorded', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 72 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: new Date(Date.now() + 72 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 72 * 3600 * 1000)), tripType: 'round_trip',
   });
 
   await cancelMyBooking(customer.id, booking.id);
   const row = await rowFor(booking.id);
   expect(row.status).toBe('cancelled');
   expect(row.paymentStatus).toBe('pending');
-  expect(row.refundPaise).toBeNull();
+  // Nothing was ever taken, so nothing goes back - and this is well inside the
+  // free window, so nothing is owed either.
+  expect(row.refundPaise).toBe(0);
+  expect(row.cancellationFeePaise).toBe(0);
+});
+
+// Nothing has been paid under postpaid billing, so a late cancellation is a
+// charge rather than a deduction from a refund. It is recorded as owed rather
+// than collected - taking it needs a payment method on file - but a partner who
+// lost a day to it must not be left with no trace that anything is due.
+test('cancelling late records a fee owed rather than a refund', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  await cancelMyBooking(customer.id, booking.id);
+
+  const row = await rowFor(booking.id);
+  expect(row.status).toBe('cancelled');
+  // The fee is a quarter of the estimate, since the estimate is all there is.
+  expect(row.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(row.refundPaise).toBe(0);
+  // Still unpaid: the fee is owed, not taken.
+  expect(row.paymentStatus).toBe('pending');
+  expect(row.refundRef).toBeNull();
 });
 
 // A settled refund is a record of what happened, not a view of current policy.
@@ -1739,12 +1843,12 @@ test('earnings exclude completed trips that were never paid', async () => {
   const driver = await createDriver(owner.id, { name: 'Unpaid', phone: '9876500055' });
   const booking = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Delhi', to: 'Agra',
-    pickupDatetime: new Date(Date.now() + 1000 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: new Date(Date.now() + 1000 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 1000 * 3600 * 1000)), tripType: 'round_trip',
   });
   await acceptBooking(owner.id, booking.id);
   await assignDriver(owner.id, booking.id, driver.id);
   await startTrip(owner.id, booking.id);
-  await completeTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id, ODO(booking));
 
   // Completed but unpaid.
   expect((await getEarnings(owner.id)).completedTrips).toBe(0);
@@ -1758,33 +1862,33 @@ test('earnings exclude completed trips that were never paid', async () => {
 
 // --- Hardening: hold expiry, bounded listings (#37, #39, #40) -----------------
 
-// Booking every car and never paying would otherwise take a partner's whole
+// Booking every car and walking away would otherwise take a partner's whole
 // fleet off the market for free - a pending booking is a live reservation.
-test('an abandoned unpaid hold is released when someone else wants the vehicle', async () => {
+test('a booking nobody accepted is released when someone else wants the vehicle', async () => {
   const squatter = await createUser();
   const buyer = await createUser();
   const { vehicle } = await bookableVehicle(1000);
   const pickup = new Date(Date.now() + 1200 * 3600 * 1000);
 
   const held = await createBooking(squatter.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   // Still fresh, so it genuinely blocks.
   await expectReject(
     createBooking(buyer.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
 
-  // Age it past the hold window.
+  // Age it past the acceptance window.
   await db
     .update(bookings)
-    .set({ createdAt: new Date(Date.now() - 60 * 60_000) })
+    .set({ createdAt: new Date(Date.now() - 13 * 3_600_000) })
     .where(eq(bookings.id, held.id));
 
   const won = await createBooking(buyer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
   expect(won.status).toBe('pending');
 
@@ -1793,23 +1897,23 @@ test('an abandoned unpaid hold is released when someone else wants the vehicle',
   expect(expired.cancelledBy).toBe('system');
 });
 
-// A paid booking is not abandoned, however old - only unpaid holds expire.
-test('a paid booking is never released by hold expiry', async () => {
+// Nothing is paid until after the trip, so payment cannot be the signal that a
+// booking is real - acceptance is. This is the case the old expiry rule got
+// wrong: it keyed on payment_status, which under postpaid is 'pending' for
+// every perfectly good trip, so it would have cancelled the lot.
+test('an accepted booking is never released by hold expiry', async () => {
   const customer = await createUser();
   const other = await createUser();
-  const { vehicle } = await bookableVehicle(1000);
+  const { vehicle, owner } = await bookableVehicle(1000);
   const pickup = new Date(Date.now() + 1400 * 3600 * 1000);
 
   const booking = await createBooking(customer.id, {
-    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
-  const { orderId } = await startPayment(customer.id, booking.id);
-  const paymentId = `pay_hold_${booking.id.slice(0, 6)}`;
-  await confirmPayment(customer.id, booking.id, {
-    orderId, paymentId, signature: stubSignature(orderId, paymentId),
-  });
+  await acceptBooking(owner.id, booking.id);
 
-  // Older than the hold window, but paid - so it must still hold the vehicle.
+  // Far older than the acceptance window, and entirely unpaid - it must still
+  // hold the vehicle, because the partner has taken the job.
   await db
     .update(bookings)
     .set({ createdAt: new Date(Date.now() - 24 * 3600 * 1000) })
@@ -1817,13 +1921,14 @@ test('a paid booking is never released by hold expiry', async () => {
 
   await expectReject(
     createBooking(other.id, {
-      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, tripType: 'one_way',
+      vehicleId: vehicle.id, from: 'Delhi', to: 'Agra', pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
     }),
     409,
   );
 
   const [still] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
-  expect(still.status).toBe('pending');
+  expect(still.status).toBe('confirmed');
+  expect(still.paymentStatus).toBe('pending');
 });
 
 test('the vehicle listing reports the true total even when capped', async () => {
@@ -1898,7 +2003,7 @@ test('totalTrips counts completed trips only', async () => {
   await startTrip(owner.id, booking.id);
   expect((await getMe(customer.id)).totalTrips).toBe(0); // running, not taken
 
-  await completeTrip(owner.id, booking.id);
+  await completeTrip(owner.id, booking.id, ODO(booking));
   expect((await getMe(customer.id)).totalTrips).toBe(1);
 });
 
@@ -1934,7 +2039,8 @@ test('popular routes reflect real bookings', async () => {
       from: 'Delhi',
       to: 'Manali',
       pickupDatetime: new Date(Date.now() + (2000 + i * 200) * 3600 * 1000),
-      tripType: 'one_way',
+      returnDatetime: RETURN_AFTER(new Date(Date.now() + (2000 + i * 200) * 3600 * 1000)),
+      tripType: 'round_trip',
     });
   }
   // The list is cached for an hour, so without this the assertion below reads a
@@ -1953,7 +2059,7 @@ test('cancelled trips do not count as demand', async () => {
   const { vehicle } = await bookableVehicle(1000);
   const b = await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Kolkata', to: 'Digha',
-    pickupDatetime: new Date(Date.now() + 2600 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: new Date(Date.now() + 2600 * 3600 * 1000), returnDatetime: RETURN_AFTER(new Date(Date.now() + 2600 * 3600 * 1000)), tripType: 'round_trip',
   });
   await cancelMyBooking(customer.id, b.id);
 
@@ -2073,16 +2179,28 @@ test('the correct code still works below the cap', async () => {
   expect(result.user.phone).toBe(phone);
 });
 
-// A one-way trip has no return leg, so a return date there only served to hold
-// the vehicle off the market while paying for a single leg.
-test('a one-way booking cannot carry a return date', () => {
+// Every Destow trip is a round trip, so a booking with no return is incomplete
+// rather than a shorter kind of trip. Without a return there is nothing to set
+// occupied_until from, and the vehicle would be freed the moment the outward
+// drive time elapsed - while it was still hundreds of kilometres away.
+test('a booking with no return date is rejected', () => {
   const r = createBookingBody.safeParse({
     vehicleId: '00000000-0000-0000-0000-000000000000',
     from: 'Delhi',
-    to: 'Agra',
+    to: 'Manali',
     pickupDatetime: new Date(Date.now() + 86_400_000),
-    tripType: 'one_way',
-    returnDatetime: new Date(Date.now() + 30 * 86_400_000),
+  });
+  expect(r.success).toBe(false);
+});
+
+test('a return before the pickup is rejected', () => {
+  const pickup = new Date(Date.now() + 7 * 86_400_000);
+  const r = createBookingBody.safeParse({
+    vehicleId: '00000000-0000-0000-0000-000000000000',
+    from: 'Delhi',
+    to: 'Manali',
+    pickupDatetime: pickup,
+    returnDatetime: new Date(pickup.getTime() - 86_400_000),
   });
   expect(r.success).toBe(false);
 });
@@ -2144,4 +2262,183 @@ test('the admin vehicle review queue paginates', async () => {
   expect(page.items.length).toBeLessThanOrEqual(1);
   expect(page.total).toBeGreaterThanOrEqual(1);
   expect(page.page).toBe(1);
+});
+
+// --- Postpaid metering: the fare is the odometer, not the estimate -----------
+// Destow bills the distance actually driven on a long round trip, so the money
+// is decided after the vehicle comes back rather than when it is booked. These
+// cover the hinge: the partner reports, the customer agrees, and only then does
+// the amount change.
+
+async function drivenTrip(pricePerKmPaise = 1800) {
+  const customer = await createUser();
+  const { vehicle, owner } = await bookableVehicle(pricePerKmPaise);
+  const driver = await createDriver(owner.id, { name: 'Rajesh', phone: '9876500123' });
+  const pickup = AT(240);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  return { customer, owner, booking };
+}
+
+test('completing a trip records the odometer rather than settling the fare', async () => {
+  const { owner, booking } = await drivenTrip();
+  const estimateKm = Math.round(booking.distanceM / 1000);
+
+  const done = await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 42_318,
+    odometerEndKm: 42_318 + estimateKm + 118,
+  });
+
+  expect(done.status).toBe('completed');
+  expect(done.actualDistanceM).toBe((estimateKm + 118) * 1000);
+  expect(done.distanceSubmittedAt).not.toBeNull();
+  // The amount has not moved: the customer has not seen the reading yet.
+  expect(done.totalFarePaise).toBe(booking.totalFarePaise);
+  expect(done.distanceConfirmedAt).toBeNull();
+  expect(done.paymentStatus).toBe('pending');
+});
+
+// A closing reading with an extra digit turns a Rs 21,000 trip into a Rs 210,000
+// one. The customer does confirm the figure, but "tap to approve" is a weak last
+// line of defence against a number that should never have been storable.
+test('an odometer reading far beyond the estimate is refused', async () => {
+  const { owner, booking } = await drivenTrip();
+  await expectReject(
+    completeTrip(owner.id, booking.id, {
+      odometerStartKm: 42_318,
+      odometerEndKm: 42_318 + Math.round(booking.distanceM / 1000) * 10,
+    }),
+    422,
+  );
+});
+
+test('a closing reading below the opening one is refused', () => {
+  const r = submitOdometerBody.safeParse({ odometerStartKm: 43_512, odometerEndKm: 42_318 });
+  expect(r.success).toBe(false);
+});
+
+test('confirming the distance rebills at the frozen rate and keeps the estimate', async () => {
+  const { customer, owner, booking } = await drivenTrip(1800);
+  const estimateKm = Math.round(booking.distanceM / 1000);
+  const actualKm = estimateKm + 118;
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 42_318, odometerEndKm: 42_318 + actualKm,
+  });
+
+  const confirmed = await confirmTripDistance(customer.id, booking.id);
+
+  expect(confirmed.actualDistanceM).toBe(actualKm * 1000);
+  expect(confirmed.totalFarePaise).toBe(Math.round((1800 * actualKm * 1000) / 1000));
+  expect(confirmed.distanceConfirmedAt).not.toBeNull();
+  // The quote survives the recompute, so "quoted vs charged" can still be shown.
+  expect(confirmed.estimatedFarePaise).toBe(booking.totalFarePaise);
+  expect(confirmed.totalFarePaise).toBeGreaterThan(confirmed.estimatedFarePaise);
+
+  // Commission follows the money actually charged, and still reconciles.
+  const [row] = await db.select().from(bookings).where(eq(bookings.id, booking.id));
+  expect(row.commissionPaise + row.providerPayoutPaise).toBe(row.totalFarePaise);
+  // The rate itself was frozen at booking and must not have moved.
+  expect(row.pricePerKmPaise).toBe(1800);
+});
+
+// A shorter trip than estimated bills less. The customer is charged for what
+// the vehicle ran, in both directions.
+test('a trip shorter than the estimate is billed down, not held at the quote', async () => {
+  const { customer, owner, booking } = await drivenTrip(1200);
+  const shortKm = Math.round(booking.distanceM / 1000) - 60;
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 10_000, odometerEndKm: 10_000 + shortKm,
+  });
+
+  const confirmed = await confirmTripDistance(customer.id, booking.id);
+  expect(confirmed.totalFarePaise).toBe(1200 * shortKm);
+  expect(confirmed.totalFarePaise).toBeLessThan(confirmed.estimatedFarePaise);
+});
+
+// A double tap, or a retry after a dropped response, must not recompute and
+// re-charge.
+test('confirming twice does not move the fare again', async () => {
+  const { customer, owner, booking } = await drivenTrip();
+  const actualKm = Math.round(booking.distanceM / 1000) + 40;
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 5_000, odometerEndKm: 5_000 + actualKm,
+  });
+
+  const first = await confirmTripDistance(customer.id, booking.id);
+  const second = await confirmTripDistance(customer.id, booking.id);
+  expect(second.totalFarePaise).toBe(first.totalFarePaise);
+  expect(second.distanceConfirmedAt).toBe(first.distanceConfirmedAt);
+});
+
+test('a trip with no submitted odometer cannot be confirmed', async () => {
+  const { customer, booking } = await drivenTrip();
+  await expectReject(confirmTripDistance(customer.id, booking.id), 409);
+});
+
+test('someone else cannot confirm your distance', async () => {
+  const { owner, booking } = await drivenTrip();
+  const stranger = await createUser();
+  await completeTrip(owner.id, booking.id, {
+    odometerStartKm: 1_000, odometerEndKm: 1_000 + Math.round(booking.distanceM / 1000),
+  });
+  await expectReject(confirmTripDistance(stranger.id, booking.id), 404);
+});
+
+// --- #34: a cancelled trip must never end up marked paid ---------------------
+// Reachable with no race at all: the customer opens a payment, cancels while it
+// is in flight - nothing is refunded, because nothing was paid yet - and the
+// gateway then captures and fires its webhook. Guarding only on payment status
+// let that settle, leaving a booking both cancelled and paid, money taken, and
+// nothing anywhere saying so.
+
+test('a payment confirmed after cancellation does not settle the booking', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = `pay_late_${booking.id.slice(0, 6)}`;
+
+  // Cancel out from under the in-flight payment.
+  await db
+    .update(bookings)
+    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
+    .where(eq(bookings.id, booking.id));
+
+  await expectReject(
+    confirmPayment(customer.id, booking.id, {
+      orderId, paymentId, signature: stubSignature(orderId, paymentId),
+    }),
+    409,
+  );
+
+  const row = await rowFor(booking.id);
+  expect(row.paymentStatus).toBe('pending');
+  expect(row.transactionRef).toBeNull();
+  expect(row.paidAt).toBeNull();
+});
+
+test('a webhook for a cancelled booking does not settle it', async () => {
+  const { customer, booking } = await payableBooking();
+  const { orderId } = await startPayment(customer.id, booking.id);
+  const paymentId = `pay_hook_${booking.id.slice(0, 6)}`;
+
+  await db
+    .update(bookings)
+    .set({ status: 'cancelled', cancelledAt: new Date(), cancelledBy: 'customer' })
+    .where(eq(bookings.id, booking.id));
+
+  const body = stubWebhookBody({ orderId, paymentId, amountPaise: booking.totalFarePaise });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+
+  // Acknowledged rather than errored - the gateway did nothing wrong and
+  // retrying will not help - but explicitly not settled.
+  expect(result.handled).toBe(false);
+  expect(result.reason).toMatch(/cancelled/i);
+
+  const row = await rowFor(booking.id);
+  expect(row.paymentStatus).toBe('pending');
+  expect(row.paidAt).toBeNull();
 });

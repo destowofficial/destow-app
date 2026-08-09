@@ -16,7 +16,7 @@ import {
   bookings,
 } from '../../db/schema.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
-import { computeFare } from '../../lib/pricing/pricing.js';
+import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
 import { redis, observeRedis } from '../../db/redis.js';
 import { safeError } from '../../lib/log/safe.js';
@@ -92,10 +92,11 @@ export async function listAvailableVehicles(
 
   const priced = rows.map(({ vehicle, type, provider }): AvailableVehicle => {
     // Same engine the booking will use, with the same inputs, so the quoted
-    // price and the frozen price cannot disagree.
+    // estimate and the booked estimate cannot disagree. The doubling matters:
+    // quoting the one-way route for a round trip under-quoted by half.
     const fare = computeFare({
       pricePerKmPaise: vehicle.pricePerKmPaise,
-      distanceM: route.distanceM,
+      distanceM: roundTripDistanceM(route.distanceM),
       commissionBps: provider.commissionBpsOverride ?? defaultBps,
     });
 

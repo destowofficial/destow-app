@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { assignDriverBody, providerBookingsQuery } from '@destow/contracts';
+import { assignDriverBody, providerBookingsQuery, submitOdometerBody } from '@destow/contracts';
 import {
   listProviderBookings,
   acceptBooking,
@@ -40,8 +40,12 @@ export async function startTripController(req: Request, res: Response) {
   ok(res, { booking: await startTrip(callerId(req), uuidParam(req.params.id)) });
 }
 
+// Completing a trip now carries the odometer, because the reading is what the
+// customer is billed from. A completion with no distance would leave a trip
+// that can never be charged.
 export async function completeTripController(req: Request, res: Response) {
-  ok(res, { booking: await completeTrip(callerId(req), uuidParam(req.params.id)) });
+  const body = parseOrThrow(submitOdometerBody, req.body);
+  ok(res, { booking: await completeTrip(callerId(req), uuidParam(req.params.id), body) });
 }
 
 export async function earningsController(req: Request, res: Response) {

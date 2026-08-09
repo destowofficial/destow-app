@@ -4,6 +4,7 @@ import {
   listBookingsController,
   getBookingController,
   cancelBookingController,
+  confirmDistanceController,
   startPaymentController,
   confirmPaymentController,
   rateBookingController,
@@ -22,6 +23,10 @@ bookingsRouter.post('/', createBookingController);
 bookingsRouter.get('/', listBookingsController);
 bookingsRouter.get('/:id', getBookingController);
 bookingsRouter.post('/:id/cancel', cancelBookingController);
+
+// The gate between "the driver says" and "the card is charged". Customer-only
+// by virtue of this router's auth, which is the whole point of the step.
+bookingsRouter.post('/:id/confirm-distance', confirmDistanceController);
 
 // Pay opens (or reuses) a gateway order; confirm settles it against a signature
 // the gateway produced. The amount is never in either request.

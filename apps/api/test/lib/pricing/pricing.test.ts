@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { computeFare } from '@/lib/pricing/pricing';
+import { computeFare, roundTripDistanceM } from '@/lib/pricing/pricing';
 
 describe('computeFare', () => {
   it('computes fare, commission and payout in integer paise', () => {
@@ -20,27 +20,36 @@ describe('round trips', () => {
   // A round trip drives the route twice. Charging the one-way distance made the
   // partner cover the return leg for free - on a Delhi-Manali return that is
   // roughly 430 km of fuel and a day of the driver's time, unpaid.
+  it('doubles the routed distance for the return leg', () => {
+    expect(roundTripDistanceM(200_000)).toBe(400_000);
+  });
+
   it('charges both legs', () => {
-    const oneWay = computeFare({ pricePerKmPaise: 1300, distanceM: 200_000, commissionBps: 1800 });
+    const oneLeg = computeFare({ pricePerKmPaise: 1300, distanceM: 200_000, commissionBps: 1800 });
     const round = computeFare({
-      pricePerKmPaise: 1300, distanceM: 200_000, commissionBps: 1800, tripType: 'round_trip',
+      pricePerKmPaise: 1300, distanceM: roundTripDistanceM(200_000), commissionBps: 1800,
     });
-    expect(round.totalFarePaise).toBe(oneWay.totalFarePaise * 2);
+    expect(round.totalFarePaise).toBe(oneLeg.totalFarePaise * 2);
     expect(round.distanceM).toBe(400_000);
   });
 
-  it('defaults to one way when no trip type is given', () => {
-    const implicit = computeFare({ pricePerKmPaise: 1000, distanceM: 100_000, commissionBps: 1800 });
-    const explicit = computeFare({
-      pricePerKmPaise: 1000, distanceM: 100_000, commissionBps: 1800, tripType: 'one_way',
+  // The doubling used to live inside computeFare behind a tripType flag. It was
+  // moved out because the fare is computed twice in a booking's life - once from
+  // the routed estimate and once from the odometer - and the odometer figure is
+  // already both legs. A hidden doubling would have billed the metered trip
+  // twice, so computeFare must now charge exactly the distance it is handed.
+  it('charges exactly the distance it is given, never doubling on its own', () => {
+    const metered = computeFare({
+      pricePerKmPaise: 1800, distanceM: 1_194_000, commissionBps: 1800,
     });
-    expect(implicit.totalFarePaise).toBe(explicit.totalFarePaise);
+    expect(metered.distanceM).toBe(1_194_000);
+    expect(metered.totalFarePaise).toBe(Math.round((1800 * 1_194_000) / 1000));
   });
 
   // Commission is a share of the fare, so doubling the fare doubles it too.
   it('takes commission on the whole round trip', () => {
     const round = computeFare({
-      pricePerKmPaise: 1300, distanceM: 200_000, commissionBps: 1800, tripType: 'round_trip',
+      pricePerKmPaise: 1300, distanceM: roundTripDistanceM(200_000), commissionBps: 1800,
     });
     expect(round.commissionPaise + round.providerPayoutPaise).toBe(round.totalFarePaise);
     expect(round.commissionPaise).toBe(Math.round((round.totalFarePaise * 1800) / 10_000));
@@ -69,7 +78,7 @@ describe('fare bounds', () => {
   it('applies the bound after doubling a round trip', () => {
     expect(() =>
       computeFare({
-        pricePerKmPaise: 100_000, distanceM: 4_000_000, commissionBps: 1800, tripType: 'round_trip',
+        pricePerKmPaise: 100_000, distanceM: roundTripDistanceM(4_000_000), commissionBps: 1800,
       }),
     ).toThrow();
   });
