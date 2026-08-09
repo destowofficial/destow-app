@@ -14,7 +14,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#2563eb"
+        "backgroundColor": "#ffffff",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.destow.app"
     },
@@ -29,7 +30,7 @@
         {
           "image": "./assets/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#2563eb"
+          "backgroundColor": "#ffffff"
         }
       ],
       "expo-font",

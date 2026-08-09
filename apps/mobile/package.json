@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@destow/contracts": "workspace:*",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/vector-icons": "^15.1.1",
     "date-fns": "^4.4.0",
@@ -12,6 +13,7 @@
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.5",
     "expo-router": "~57.0.11",
+    "expo-secure-store": "~15.0.7",
     "expo-splash-screen": "~57.0.5",
     "expo-status-bar": "~57.0.1",
     "lucide-react-native": "^1.23.0",
@@ -31,13 +33,15 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "bun-types": "^1.3.14",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "test:wireup": "EXPO_PUBLIC_API_URL=http://localhost:3100/api/v1 bun test ./services/wireup.itest.ts"
   },
   "private": true
 }
