@@ -2093,9 +2093,10 @@ test('the popular routes ranking is served from cache until invalidated', async 
   const countOf = (rs: Awaited<ReturnType<typeof listPopularRoutes>>) =>
     rs.find((r) => r.from === 'Surat' && r.to === 'Daman')?.bookings ?? 0;
 
+  const pickup = new Date(Date.now() + 2800 * 3600 * 1000);
   await createBooking(customer.id, {
     vehicleId: vehicle.id, from: 'Surat', to: 'Daman',
-    pickupDatetime: new Date(Date.now() + 2800 * 3600 * 1000), tripType: 'one_way',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
   });
 
   // A new booking does not move the ranking while the cached list is live -
