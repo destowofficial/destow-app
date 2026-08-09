@@ -76,8 +76,26 @@ export async function setProviderStatus(
   return updated;
 }
 
-export async function listProviders(status?: ProviderStatus) {
-  return db
+// Paginated like every other listing. These grow with the marketplace and both
+// join owner contact details, so an unbounded version returns slower results and
+// more personal data with every partner who onboards.
+const MAX_PAGE = 50;
+
+function pageOf(page = 1, limit = 20) {
+  const take = Math.min(Math.max(limit, 1), MAX_PAGE);
+  return { take, skip: (Math.max(page, 1) - 1) * take, page: Math.max(page, 1) };
+}
+
+export async function listProviders(status?: ProviderStatus, page = 1, limit = 20) {
+  const { take, skip, page: current } = pageOf(page, limit);
+  const where = status ? eq(serviceProviders.status, status) : undefined;
+
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(serviceProviders)
+    .where(where);
+
+  const items = await db
     .select({
       id: serviceProviders.id,
       agencyName: serviceProviders.agencyName,
@@ -88,8 +106,12 @@ export async function listProviders(status?: ProviderStatus) {
     })
     .from(serviceProviders)
     .innerJoin(users, eq(users.id, serviceProviders.ownerUserId))
-    .where(status ? eq(serviceProviders.status, status) : undefined)
-    .orderBy(serviceProviders.createdAt);
+    .where(where)
+    .orderBy(serviceProviders.createdAt)
+    .limit(take)
+    .offset(skip);
+
+  return { items, total, page: current, limit: take };
 }
 
 // Give an existing user admin credentials. Separate from role assignment so the
@@ -188,8 +210,13 @@ export async function updateOtpSettings(patch: OtpSettingsPatch) {
 // --- Vehicle approval ---------------------------------------------------------
 // A vehicle is bookable only once an admin has approved it, so this is the gate
 // between a partner listing a car and a customer being able to hire it.
-export async function listVehiclesForReview(status?: VehicleStatus) {
-  return db
+export async function listVehiclesForReview(status?: VehicleStatus, page = 1, limit = 20) {
+  const { take, skip, page: current } = pageOf(page, limit);
+  const where = status ? eq(vehicles.status, status) : undefined;
+
+  const [{ total }] = await db.select({ total: count() }).from(vehicles).where(where);
+
+  const items = await db
     .select({
       id: vehicles.id,
       registrationNo: vehicles.registrationNo,
@@ -207,8 +234,12 @@ export async function listVehiclesForReview(status?: VehicleStatus) {
     .from(vehicles)
     .innerJoin(vehicleTypes, eq(vehicleTypes.id, vehicles.vehicleTypeId))
     .innerJoin(serviceProviders, eq(serviceProviders.id, vehicles.serviceProviderId))
-    .where(status ? eq(vehicles.status, status) : undefined)
-    .orderBy(vehicles.createdAt);
+    .where(where)
+    .orderBy(vehicles.createdAt)
+    .limit(take)
+    .offset(skip);
+
+  return { items, total, page: current, limit: take };
 }
 
 export async function setVehicleStatus(vehicleId: string, status: VehicleStatus) {

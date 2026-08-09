@@ -7,6 +7,9 @@ import { getJwks } from './lib/auth/keys.js';
 import { metricsMiddleware } from './middleware/metrics/metrics.js';
 import { metricsText, metricsContentType } from './lib/metrics/metrics.js';
 import { v1Router } from './v1/index.js';
+import { pool } from './db/connection.js';
+import { redis } from './db/redis.js';
+import { safeError } from './lib/log/safe.js';
 
 const app: express.Express = express();
 
@@ -92,6 +95,57 @@ const server = http.createServer(app);
 const PORT = Number(env.PORT) || 3000;
 server.listen(PORT, () => {
   console.log(`Destow API on http://localhost:${PORT}`);
+});
+
+// --- Shutdown -----------------------------------------------------------------
+// A container is stopped by SIGTERM. Without handling it the process dies mid
+// request: a customer's booking insert is cut off, a payment confirmation never
+// returns, and the Postgres pool leaves connections for the server to time out.
+// Stop accepting new work, let what is in flight finish, then close the pool and
+// Redis.
+let shuttingDown = false;
+async function shutdown(signal: string) {
+  if (shuttingDown) return; // a second Ctrl-C should not race the first
+  shuttingDown = true;
+  console.log(`[shutdown] ${signal} received, draining`);
+
+  // Force-exit if a request hangs; a stuck process is worse than a cut-off one,
+  // because the orchestrator waits for it before starting the replacement.
+  const forced = setTimeout(() => {
+    console.error('[shutdown] drain timed out, exiting');
+    process.exit(1);
+  }, 10_000);
+  forced.unref();
+
+  server.close(async () => {
+    try {
+      await pool.end();
+      await redis.quit();
+    } catch (err) {
+      console.error(`[shutdown] cleanup failed: ${safeError(err)}`);
+    }
+    clearTimeout(forced);
+    console.log('[shutdown] done');
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
+
+// An unhandled rejection is a bug we have not seen yet. Log it with the full
+// context rather than letting the default handler print a bare trace - and do
+// not exit: killing the process on one bad promise turns a single failed
+// request into an outage for everyone mid-flight.
+process.on('unhandledRejection', (reason) => {
+  console.error(`[fatal] unhandled rejection: ${safeError(reason)}`);
+});
+
+// An uncaught exception, by contrast, means the process is in an unknown state.
+// Log and let it die so the orchestrator restarts something healthy.
+process.on('uncaughtException', (err) => {
+  console.error(`[fatal] uncaught exception: ${safeError(err)}`);
+  process.exit(1);
 });
 
 export { app, server };

@@ -46,3 +46,31 @@ describe('round trips', () => {
     expect(round.commissionPaise).toBe(Math.round((round.totalFarePaise * 1800) / 10_000));
   });
 });
+
+describe('fare bounds', () => {
+  // Money columns are int4. A fare above that wraps negative and the booking
+  // ends up owing the customer money, so it must fail rather than truncate.
+  it('refuses a route long enough to overflow the fare column', () => {
+    expect(() =>
+      computeFare({ pricePerKmPaise: 100_000, distanceM: 9_000_000, commissionBps: 1800 }),
+    ).toThrow();
+  });
+
+  it('accepts the longest realistic Indian outstation route', () => {
+    // ~3000 km at the Rs1000/km ceiling - far above anything real, still fine.
+    const fare = computeFare({
+      pricePerKmPaise: 100_000, distanceM: 3_000_000, commissionBps: 1800,
+    });
+    expect(fare.totalFarePaise).toBeLessThan(2_147_483_647);
+    expect(fare.commissionPaise + fare.providerPayoutPaise).toBe(fare.totalFarePaise);
+  });
+
+  // A round trip doubles the distance, so the bound has to survive that too.
+  it('applies the bound after doubling a round trip', () => {
+    expect(() =>
+      computeFare({
+        pricePerKmPaise: 100_000, distanceM: 4_000_000, commissionBps: 1800, tripType: 'round_trip',
+      }),
+    ).toThrow();
+  });
+});
