@@ -96,7 +96,12 @@ export default function Otp() {
 
         {/* One hidden input behind six boxes: the OS keyboard and SMS
             autofill both want a single field, and six real inputs fight it. */}
-        <Pressable style={styles.boxes} onPress={() => input.current?.focus()}>
+        <Pressable
+          style={styles.boxes}
+          onPress={() => input.current?.focus()}
+          accessibilityRole="button"
+          accessibilityLabel="Enter the six digit code"
+        >
           {boxes.map((d, i) => (
             <View
               key={i}

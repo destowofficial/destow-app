@@ -7,6 +7,7 @@ import {
   Card,
   Footer,
   Header,
+  ErrorState,
   Label,
   Loading,
   P,
@@ -66,7 +67,12 @@ export default function Plan() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card style={styles.legs}>
-          <Pressable style={styles.leg} onPress={() => setPicking('from')}>
+          <Pressable
+            style={styles.leg}
+            onPress={() => setPicking('from')}
+            accessibilityRole="button"
+            accessibilityLabel="Choose where you are travelling from"
+          >
             <Ionicons name="ellipse-outline" size={f(17)} color={color.ok} />
             <View style={styles.legText}>
               <Label>From</Label>
@@ -76,7 +82,12 @@ export default function Plan() {
             </View>
           </Pressable>
           <View style={styles.legDivider} />
-          <Pressable style={styles.leg} onPress={() => setPicking('to')}>
+          <Pressable
+            style={styles.leg}
+            onPress={() => setPicking('to')}
+            accessibilityRole="button"
+            accessibilityLabel="Choose where you are going"
+          >
             <Ionicons name="location-outline" size={f(17)} color={color.red} />
             <View style={styles.legText}>
               <Label>To</Label>
@@ -127,6 +138,8 @@ export default function Plan() {
           />
           {cities.loading ? (
             <Loading />
+          ) : cities.error ? (
+            <ErrorState message={cities.error} onRetry={cities.reload} />
           ) : (
             <ScrollView contentContainerStyle={styles.cityList}>
               {(cities.data ?? []).map((c) => (

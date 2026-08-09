@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   Badge, Button, Card, Empty, ErrorState, Footer, Header, Loading, P, Row, Screen, Small,
 } from '../components/ui/kit';
+import { ListSkeleton } from '../components/ui/Skeleton';
 import { color, radius, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
 import { listSessions, signOutEverywhere } from '../services/destow';
@@ -42,7 +43,7 @@ export default function Devices() {
       </View>
 
       {sessions.loading && !sessions.data ? (
-        <Loading />
+        <ListSkeleton rows={3} />
       ) : sessions.error ? (
         <ErrorState message={sessions.error} onRetry={sessions.reload} />
       ) : (sessions.data?.length ?? 0) === 0 ? (

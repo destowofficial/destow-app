@@ -15,6 +15,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { ListSkeleton } from '../../components/ui/Skeleton';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { listMyBookings } from '../../services/destow';
@@ -56,7 +57,7 @@ export default function Trips() {
       </View>
 
       {page.loading && !page.data ? (
-        <Loading />
+        <ListSkeleton rows={4} tall />
       ) : page.error ? (
         <ErrorState message={page.error} onRetry={page.reload} />
       ) : items.length === 0 ? (

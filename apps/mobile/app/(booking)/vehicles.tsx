@@ -14,6 +14,7 @@ import {
   Screen,
   Small,
 } from '../../components/ui/kit';
+import { ListSkeleton } from '../../components/ui/Skeleton';
 import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { listAvailableVehicles } from '../../services/destow';
@@ -66,7 +67,7 @@ export default function Vehicles() {
       </View>
 
       {listing.loading ? (
-        <Loading label="Pricing the route…" />
+        <ListSkeleton rows={4} />
       ) : listing.error ? (
         <ErrorState message={listing.error} onRetry={listing.reload} />
       ) : (listing.data?.vehicles.length ?? 0) === 0 ? (

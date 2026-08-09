@@ -41,7 +41,12 @@ export default function Rate() {
   return (
     <Screen>
       <View style={styles.top}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Rate later"
+        >
           <Small style={styles.skip}>Not now</Small>
         </Pressable>
       </View>
