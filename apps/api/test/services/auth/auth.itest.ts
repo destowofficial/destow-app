@@ -42,6 +42,7 @@ import {
   listMyBookings,
   cancelMyBooking,
   confirmTripDistance,
+  previewCancellation,
 } from '@/services/bookings/bookings.service.js';
 import {
   startPayment,
@@ -2441,4 +2442,89 @@ test('a webhook for a cancelled booking does not settle it', async () => {
   const row = await rowFor(booking.id);
   expect(row.paymentStatus).toBe('pending');
   expect(row.paidAt).toBeNull();
+});
+
+// --- The cancellation fee, shown before they commit --------------------------
+// The policy lived in platform_settings and was readable only from inside the
+// refund routine, so the app could not state the fee at the moment it mattered.
+// A customer who cancels and only then learns a quarter of the fare is owed
+// reads that as a trick, however clearly it is written in the terms.
+
+test('a trip well before pickup previews as free to cancel', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(72);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.cancellable).toBe(true);
+  expect(preview.isFree).toBe(true);
+  expect(preview.cancellationFeePaise).toBe(0);
+  expect(preview.alreadyPaid).toBe(false);
+  // Free until 24 hours before pickup, by the seeded policy.
+  expect(new Date(preview.freeUntil).getTime()).toBe(pickup.getTime() - 24 * 3_600_000);
+});
+
+test('a trip inside the window previews the fee it will actually charge', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.isFree).toBe(false);
+  expect(preview.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(preview.cancellationFeeDisplay).toMatch(/^₹/);
+  // Nothing was taken, so nothing goes back - the fee is a charge.
+  expect(preview.refundPaise).toBe(0);
+
+  // The preview and the charge must be the same number, or the preview is worse
+  // than not showing one.
+  await cancelMyBooking(customer.id, booking.id);
+  const row = await rowFor(booking.id);
+  expect(row.cancellationFeePaise).toBe(preview.cancellationFeePaise);
+});
+
+// Once the vehicle is on the road with them in it, cancelling is a refund
+// conversation. The screen should not offer a button that cannot work.
+test('a running trip previews as not cancellable', async () => {
+  const { customer, booking } = await drivenTrip();
+  const preview = await previewCancellation(customer.id, booking.id);
+  expect(preview.cancellable).toBe(false);
+});
+
+test('someone else cannot see what your cancellation would cost', async () => {
+  const customer = await createUser();
+  const stranger = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(50);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+  await expectReject(previewCancellation(stranger.id, booking.id), 404);
+});
+
+// The trips list has to show what a cancelled trip actually cost, which means
+// the outcome has to survive onto the customer's view of it.
+test('a cancelled booking carries its settled outcome', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const pickup = AT(2);
+  const booking = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Delhi', to: 'Manali',
+    pickupDatetime: pickup, returnDatetime: RETURN_AFTER(pickup), tripType: 'round_trip',
+  });
+
+  const cancelled = await cancelMyBooking(customer.id, booking.id);
+  expect(cancelled.cancelledAt).not.toBeNull();
+  expect(cancelled.cancelledBy).toBe('customer');
+  expect(cancelled.cancellationFeePaise).toBe(Math.round(booking.totalFarePaise * 0.25));
+  expect(cancelled.refundPaise).toBe(0);
 });

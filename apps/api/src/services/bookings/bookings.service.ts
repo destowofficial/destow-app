@@ -1,5 +1,6 @@
 import { and, count, desc, eq, isNull, lt } from 'drizzle-orm';
 import type {
+  CancellationPreview,
   CreateBookingBody,
   CustomerBooking,
   ListBookingsQuery,
@@ -14,7 +15,7 @@ import {
   serviceProviders,
 } from '../../db/schema.js';
 import { AppError } from '../../lib/http/errors.js';
-import { assertTransition } from '../../lib/bookings/lifecycle.js';
+import { assertTransition, canTransition } from '../../lib/bookings/lifecycle.js';
 import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
 import { safeError } from '../../lib/log/safe.js';
@@ -69,6 +70,10 @@ function toCustomerBooking(r: Row): CustomerBooking {
     actualDistanceM: r.booking.actualDistanceM,
     distanceSubmittedAt: r.booking.distanceSubmittedAt?.toISOString() ?? null,
     distanceConfirmedAt: r.booking.distanceConfirmedAt?.toISOString() ?? null,
+    cancelledAt: r.booking.cancelledAt?.toISOString() ?? null,
+    cancelledBy: r.booking.cancelledBy,
+    cancellationFeePaise: r.booking.cancellationFeePaise,
+    refundPaise: r.booking.refundPaise,
     vehicleTypeName: r.type.name,
     modelName: r.vehicle.modelName,
     registrationNo: r.vehicle.registrationNo,
@@ -432,4 +437,61 @@ export async function confirmTripDistance(
   if (!updated) return getMyBooking(customerUserId, bookingId);
 
   return getMyBooking(customerUserId, bookingId);
+}
+
+// What cancelling right now would cost, so the customer sees the number before
+// they commit to it rather than discovering it afterwards.
+//
+// The policy lives in platform_settings and was previously readable only from
+// inside the refund routine, which meant the app could not state the fee at the
+// moment it mattered. A customer who cancels and only then learns a quarter of
+// the fare is owed reads that as a trick, however clearly it is written in the
+// terms.
+export async function previewCancellation(
+  customerUserId: string,
+  bookingId: string,
+): Promise<CancellationPreview> {
+  const [booking] = await db
+    .select()
+    .from(bookings)
+    .where(and(eq(bookings.id, bookingId), eq(bookings.customerUserId, customerUserId)))
+    .limit(1);
+  if (!booking) throw AppError.notFound('Booking not found');
+
+  const [settings] = await db
+    .select({
+      freeHours: platformSettings.cancellationFreeHours,
+      feeBps: platformSettings.cancellationFeeBps,
+    })
+    .from(platformSettings)
+    .limit(1);
+  const freeHours = settings?.freeHours ?? 24;
+  const feeBps = settings?.feeBps ?? 2500;
+
+  const breakdown = computeRefund({
+    totalFarePaise: booking.totalFarePaise,
+    pickupAt: booking.pickupDatetime,
+    cancelledAt: new Date(),
+    policy: { freeHours, feeBps },
+  });
+
+  const alreadyPaid = booking.paymentStatus === 'paid';
+
+  return {
+    bookingId: booking.id,
+    // The lifecycle is the authority on this, not the screen: once the vehicle
+    // is on the road with them in it, cancelling is a refund conversation.
+    cancellable: canTransition(booking.status, 'cancelled'),
+    isFree: breakdown.withinFreeWindow,
+    freeUntil: new Date(booking.pickupDatetime.getTime() - freeHours * 3_600_000).toISOString(),
+    freeHours,
+    feeBps,
+    cancellationFeePaise: breakdown.cancellationFeePaise,
+    cancellationFeeDisplay: formatPaise(breakdown.cancellationFeePaise),
+    // Nothing was taken under postpaid, so nothing goes back - the fee is a
+    // charge. A refund figure only means anything if money is actually in hand.
+    refundPaise: alreadyPaid ? breakdown.refundPaise : 0,
+    refundDisplay: formatPaise(alreadyPaid ? breakdown.refundPaise : 0),
+    alreadyPaid,
+  };
 }

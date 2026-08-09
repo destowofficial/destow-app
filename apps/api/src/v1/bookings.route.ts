@@ -5,6 +5,7 @@ import {
   getBookingController,
   cancelBookingController,
   confirmDistanceController,
+  cancellationPreviewController,
   startPaymentController,
   confirmPaymentController,
   rateBookingController,
@@ -22,6 +23,7 @@ bookingsRouter.use(requireAuth, requireRole('customer'), requireClient('customer
 bookingsRouter.post('/', createBookingController);
 bookingsRouter.get('/', listBookingsController);
 bookingsRouter.get('/:id', getBookingController);
+bookingsRouter.get('/:id/cancellation', cancellationPreviewController);
 bookingsRouter.post('/:id/cancel', cancelBookingController);
 
 // The gate between "the driver says" and "the card is charged". Customer-only
