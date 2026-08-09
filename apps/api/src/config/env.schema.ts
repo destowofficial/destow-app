@@ -154,6 +154,17 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error("CORS_ORIGINS='*' requires ALLOW_WILDCARD_CORS=true");
   }
 
+  // Taking payments without being able to verify a webhook is worse than not
+  // taking them: an unsigned POST to /webhooks/payments would settle any
+  // booking. Previously the secret defaulted to '' and every webhook verified
+  // against HMAC('', body), which anyone can compute - so the check silently
+  // became decoration exactly where it mattered most.
+  if (data.RAZORPAY_KEY_ID && data.RAZORPAY_KEY_SECRET && !data.RAZORPAY_WEBHOOK_SECRET) {
+    throw new Error(
+      'RAZORPAY_WEBHOOK_SECRET is required whenever Razorpay keys are set - without it webhook signatures cannot be verified',
+    );
+  }
+
   // Channel selection is no longer validated here - it lives in
   // platform_settings and is resolved against channelsWithCredentials() at
   // delivery time, so an admin toggle needs no redeploy.

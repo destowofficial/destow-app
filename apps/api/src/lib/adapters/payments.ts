@@ -102,8 +102,15 @@ class RazorpayProvider implements PaymentProvider {
   // Webhooks are signed over the exact raw body, so it must not be re-serialized
   // before reaching here - a re-encoded JSON object will not verify.
   verifyWebhook(rawBody: string, signature: string): boolean {
-    const expected = hmacHex(env.RAZORPAY_WEBHOOK_SECRET ?? '', rawBody);
-    return safeEqualHex(expected, signature);
+    const secret = env.RAZORPAY_WEBHOOK_SECRET;
+    // Refuse rather than fall back to ''. HMAC with an empty key is something
+    // any attacker can compute, so defaulting turns verification into theatre.
+    // parseEnv already refuses to boot in this state; this is the second lock.
+    if (!secret) {
+      console.error('[payments] webhook rejected: RAZORPAY_WEBHOOK_SECRET is not configured');
+      return false;
+    }
+    return safeEqualHex(hmacHex(secret, rawBody), signature);
   }
 }
 
