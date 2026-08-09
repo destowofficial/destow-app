@@ -15,5 +15,18 @@
 # pre-filter - the API still does the authoritative denylist check.
 :80 {
 	encode gzip
+
+	# /metrics exposes booking volume, revenue-shaped counters and route labels,
+	# and the API cannot tell a scraper from a customer - so the boundary belongs
+	# here, at the only public entry point.
+	#
+	# Blocked unconditionally rather than allowlisted by source IP. Prometheus
+	# scrapes api:3000 directly on the internal network (see
+	# observability/prometheus.*.yml), so nothing legitimate ever asks the
+	# gateway for this. An IP allowlist would also be quietly useless behind
+	# Docker or any NAT, where every request already looks private.
+	@metrics path /metrics /metrics/*
+	respond @metrics 403
+
 	reverse_proxy api:3000
 }

@@ -55,11 +55,26 @@ async function transition(
   return updated;
 }
 
-export async function listProviderBookings(userId: string, status?: BookingStatus) {
+// Paginated, like the customer's own history. This response joins customer
+// names and phone numbers, so an unbounded version would hand a partner their
+// entire customer list in one request - and grow slower every month besides.
+const MAX_PAGE = 50;
+
+export async function listProviderBookings(
+  userId: string,
+  status?: BookingStatus,
+  page = 1,
+  limit = 20,
+) {
   const providerId = await ownProviderId(userId);
+  const take = Math.min(Math.max(limit, 1), MAX_PAGE);
+  const skip = (Math.max(page, 1) - 1) * take;
+
   const where = status
     ? and(eq(bookings.serviceProviderId, providerId), eq(bookings.status, status))
     : eq(bookings.serviceProviderId, providerId);
+
+  const [{ total }] = await db.select({ total: count() }).from(bookings).where(where);
 
   const rows = await db
     .select({
@@ -90,15 +105,19 @@ export async function listProviderBookings(userId: string, status?: BookingStatu
     .innerJoin(vehicleTypes, eq(vehicleTypes.id, bookings.vehicleTypeId))
     .innerJoin(users, eq(users.id, bookings.customerUserId))
     .where(where)
-    .orderBy(desc(bookings.createdAt));
+    .orderBy(desc(bookings.createdAt))
+    .limit(take)
+    .offset(skip);
 
   // A pending request is still an offer. Withhold the customer's number until
   // the partner has actually accepted the trip, so browsing the incoming queue
   // is not a way to harvest phone numbers.
-  return rows.map((r) => ({
+  const items = rows.map((r) => ({
     ...r,
     customerPhone: r.status === 'pending' || r.status === 'cancelled' ? null : r.customerPhone,
   }));
+
+  return { items, total, page: Math.max(page, 1), limit: take };
 }
 
 export async function acceptBooking(userId: string, bookingId: string) {
