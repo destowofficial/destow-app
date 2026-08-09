@@ -40,6 +40,11 @@ export const envSchema = z.object({
   // native and send no Origin, so an empty allowlist is fully functional and
   // denies by default. The admin console must list its origin explicitly.
   CORS_ORIGINS: z.string().default(''),
+  // How many reverse proxies sit in front. 1 = the Caddy gateway, which appends
+  // the real client IP to X-Forwarded-For. Set 0 when nothing is in front: with
+  // no proxy, an X-Forwarded-For header is entirely attacker-controlled and
+  // trusting it hands them the rate-limit key.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(1),
 
   // --- Sessions / tokens (EdDSA access JWT + rotating refresh) ----------------
   // Ed25519 keypair (PEM or base64-PEM). Required unless ALLOW_EPHEMERAL_JWT_KEYS.

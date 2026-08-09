@@ -167,6 +167,28 @@ export function stubWebhookSignature(rawBody: string): string {
   return hmacHex(STUB_SECRET, rawBody);
 }
 
+// Builds a webhook body in the shape Razorpay sends, so tests exercise the same
+// parsing and reconciliation a real event will.
+export function stubWebhookBody(input: {
+  orderId: string;
+  paymentId: string;
+  amountPaise: number;
+  status?: string;
+}): string {
+  return JSON.stringify({
+    payload: {
+      payment: {
+        entity: {
+          id: input.paymentId,
+          order_id: input.orderId,
+          amount: input.amountPaise,
+          status: input.status ?? 'captured',
+        },
+      },
+    },
+  });
+}
+
 export const payments: PaymentProvider =
   env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET
     ? new RazorpayProvider()

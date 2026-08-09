@@ -142,7 +142,7 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
     throw AppError.badRequest('Invalid webhook signature');
   }
 
-  let event: { orderId?: string; paymentId?: string; status?: string };
+  let event: { orderId?: string; paymentId?: string; status?: string; amountPaise?: number };
   try {
     const parsed = JSON.parse(rawBody) as Record<string, unknown>;
     // Razorpay nests the entity; the stub sends it flat. Accept both so the
@@ -154,6 +154,8 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
       orderId: entity.order_id as string | undefined,
       paymentId: entity.id as string | undefined,
       status: entity.status as string | undefined,
+      // Razorpay reports amounts in paise, the same unit we store.
+      amountPaise: typeof entity.amount === 'number' ? entity.amount : undefined,
     };
   } catch (err) {
     console.error(`[payments] unparseable webhook body: ${safeError(err)}`);
@@ -170,7 +172,7 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
   }
 
   const [booking] = await db
-    .select({ id: bookings.id })
+    .select({ id: bookings.id, totalFarePaise: bookings.totalFarePaise })
     .from(bookings)
     .where(eq(bookings.paymentOrderId, event.orderId))
     .limit(1);
@@ -178,6 +180,20 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
   // Acknowledge unknown orders rather than erroring: a 4xx makes the gateway
   // retry an event we will never recognise.
   if (!booking) return { handled: false, reason: 'no booking for that order' };
+
+  // Reconcile against the frozen fare. A signature proves the gateway sent the
+  // event, not that the right amount arrived - so without this a part payment
+  // would settle the booking in full and the trip would run for less than it
+  // was sold for. Left unpaid and logged rather than guessed at: a short
+  // payment is a human decision, not something to round away.
+  if (event.amountPaise !== undefined && event.amountPaise !== booking.totalFarePaise) {
+    console.error(
+      `[payments] amount mismatch on booking ${booking.id}: ` +
+        `gateway ${event.amountPaise} vs fare ${booking.totalFarePaise} - not settling`,
+    );
+    recordPaymentEvent(payments.name, 'upi', 'amount_mismatch');
+    return { handled: false, reason: 'amount does not match the booking fare' };
+  }
 
   const outcome = await markPaid(booking.id, event.paymentId);
   recordPaymentEvent(payments.name, 'upi', outcome === 'settled' ? 'paid_webhook' : 'duplicate');

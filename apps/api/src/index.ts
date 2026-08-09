@@ -10,10 +10,17 @@ import { v1Router } from './v1/index.js';
 
 const app: express.Express = express();
 
-// Behind the Caddy gateway: trust its X-Forwarded-For so req.ip is the real
-// client IP (per-IP rate limits and session.ip records depend on this). '1' =
-// exactly one proxy hop (the gateway).
-app.set('trust proxy', 1);
+// How much of X-Forwarded-For to believe. Behind the gateway this must be 1:
+// Caddy APPENDS the real client IP, so Express reads past any header the caller
+// invented and lands on the genuine one - a spoofed "X-Forwarded-For: 1.2.3.4"
+// becomes "1.2.3.4, <real>" and the real address still wins.
+//
+// With nothing in front, that protection disappears and the header is entirely
+// attacker-controlled, which would let anyone rotate their own rate-limit key.
+// Setting TRUST_PROXY_HOPS=0 makes Express ignore the header and use the socket
+// peer instead. Note the OTP limits that guard SMS spend key on the phone
+// number, not the IP, so they never depended on this.
+app.set('trust proxy', env.TRUST_PROXY_HOPS);
 
 // --- Global middleware --------------------------------------------------------
 // A credentialed request forbids a wildcard origin, so the admin console needs a
