@@ -36,9 +36,10 @@ export interface RefundResult {
 // A mandate is standing permission to charge after a trip. Setting one up takes
 // no money: the customer authorises a ceiling, and what comes back is a token.
 export interface MandateAuthorisation {
-  // The order the client opens the authorisation sheet against.
+  // The gateway's handle for this authorisation, used to reconcile the approval
+  // when it comes back. Not a checkout to open - the mandate request goes to the
+  // customer's UPI app, and they approve it there.
   orderId: string;
-  keyId: string;
   // The gateway's handle for this customer, needed to charge later.
   customerRef: string;
 }
@@ -72,7 +73,10 @@ export interface PaymentProvider {
   authoriseMandate(input: {
     userId: string;
     maxAmountPaise: number;
-    method: 'upi' | 'card';
+    method: 'upi';
+    // Collected on our own screen, not in a gateway checkout - the mandate
+    // request is pushed to this address and approved in the customer's UPI app.
+    vpa: string;
   }): Promise<MandateAuthorisation>;
   // Whether the customer really approved that authorisation. Same construction
   // as verifyPayment, and the same reason: without it a client could claim an
@@ -137,7 +141,8 @@ class RazorpayProvider implements PaymentProvider {
   async authoriseMandate(_input: {
     userId: string;
     maxAmountPaise: number;
-    method: 'upi' | 'card';
+    method: 'upi';
+    vpa: string;
   }): Promise<MandateAuthorisation> {
     return observeAsync(
       externalRequestDuration,
@@ -145,8 +150,10 @@ class RazorpayProvider implements PaymentProvider {
       { provider: 'razorpay', operation: 'authorise_mandate' },
       async () => {
         throw new Error(
-          'RazorpayProvider.authoriseMandate not implemented - POST /v1/customers then ' +
-            'POST /v1/orders with token.max_amount for a zero-value authorisation',
+          'RazorpayProvider.authoriseMandate not implemented - create the customer, then ' +
+            'raise a UPI AutoPay authorisation against input.vpa. Needs the account to be ' +
+            'entitled to the server-side recurring flow; confirm the request shape with ' +
+            'Razorpay before wiring it.',
         );
       },
     );
@@ -245,7 +252,8 @@ class StubPaymentProvider implements PaymentProvider {
   async authoriseMandate(input: {
     userId: string;
     maxAmountPaise: number;
-    method: 'upi' | 'card';
+    method: 'upi';
+    vpa: string;
   }): Promise<MandateAuthorisation> {
     const auth = await observeAsync(
       externalRequestDuration,
@@ -253,11 +261,10 @@ class StubPaymentProvider implements PaymentProvider {
       { provider: 'stub', operation: 'authorise_mandate' },
       async () => ({
         orderId: `order_mand_${input.userId.replace(/-/g, '').slice(0, 18)}`,
-        keyId: 'rzp_test_stub',
         customerRef: `cust_stub_${input.userId.replace(/-/g, '').slice(0, 14)}`,
       }),
     );
-    recordPaymentEvent('stub', input.method, 'mandate_authorised');
+    recordPaymentEvent('stub', 'upi', 'mandate_authorised');
     return auth;
   }
 

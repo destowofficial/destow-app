@@ -52,7 +52,8 @@ export async function setupMandate(
   const auth = await payments.authoriseMandate({
     userId,
     maxAmountPaise: MANDATE_MAX_AMOUNT_PAISE,
-    method: body.method,
+    method: 'upi',
+    vpa: body.vpa,
   });
 
   // A pending row so the callback has something to attach to. Not active, and
@@ -63,7 +64,8 @@ export async function setupMandate(
       userId,
       provider: payments.name,
       providerCustomerId: auth.customerRef,
-      method: body.method,
+      method: 'upi',
+      label: body.vpa,
       maxAmountPaise: MANDATE_MAX_AMOUNT_PAISE,
       status: 'pending',
     })
@@ -72,10 +74,10 @@ export async function setupMandate(
   return {
     mandateId: created.id,
     orderId: auth.orderId,
-    keyId: auth.keyId,
     customerRef: auth.customerRef,
     maxAmountPaise: MANDATE_MAX_AMOUNT_PAISE,
     provider: payments.name,
+    vpa: body.vpa,
   };
 }
 

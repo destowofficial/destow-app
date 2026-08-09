@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TRIP_TYPE, BOOKING_STATUS, PAYMENT_STATUS } from './enums';
+import { TRIP_TYPE, BOOKING_STATUS, PAYMENT_STATUS, CUSTOMER_PAYMENT_METHOD } from './enums';
 
 // What a customer sends to book. Note what is absent: distance, price, fare.
 // The server resolves the vehicle, routes the distance and computes the
@@ -17,6 +17,11 @@ export const createBookingBody = z
     pickupDatetime: z.coerce.date(),
     tripType: z.literal('round_trip').default('round_trip'),
     returnDatetime: z.coerce.date(),
+    // How this trip gets settled once the distance is agreed. Defaults to cash
+    // because cash always works: it needs no mandate, so a booking can never
+    // fail for want of one. Choosing UPI is the upgrade, and it is checked at
+    // the moment it matters rather than here.
+    paymentMethod: z.enum(CUSTOMER_PAYMENT_METHOD).default('cash'),
   })
   .refine((b) => b.pickupDatetime.getTime() > Date.now(), {
     path: ['pickupDatetime'],
@@ -69,6 +74,9 @@ export interface CustomerBooking {
   pickupDatetime: string;
   returnDatetime: string | null;
   pricePerKmPaise: number;
+  // How this trip settles: charged to a UPI mandate once the distance is
+  // agreed, or handed to the driver at the end.
+  paymentMethod: (typeof CUSTOMER_PAYMENT_METHOD)[number];
   // What this booking currently costs: the estimate until the distance is
   // confirmed, the recomputed figure afterwards. Payments reconcile against it.
   totalFarePaise: number;

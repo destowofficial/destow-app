@@ -60,6 +60,7 @@ function toCustomerBooking(r: Row): CustomerBooking {
     pickupDatetime: r.booking.pickupDatetime.toISOString(),
     returnDatetime: r.booking.returnDatetime?.toISOString() ?? null,
     pricePerKmPaise: r.booking.pricePerKmPaise,
+    paymentMethod: r.booking.paymentMethod === 'upi' ? 'upi' : 'cash',
     totalFarePaise: r.booking.totalFarePaise,
     totalFareDisplay: formatPaise(r.booking.totalFarePaise),
     // Falls back to the current total for rows written before the estimate was
@@ -206,6 +207,7 @@ export async function createBooking(
       tripType: body.tripType,
       pickupDatetime: body.pickupDatetime,
       returnDatetime: body.returnDatetime,
+      paymentMethod: body.paymentMethod,
       // --- rate and commission frozen; the amount is recomputed once, when
       //     the customer confirms the odometer ---
       pricePerKmPaise: fare.pricePerKmPaise,
@@ -353,6 +355,10 @@ async function recordCancellationFee(booking: typeof bookings.$inferSelect): Pro
 
   if (breakdown.cancellationFeePaise === 0) return;
 
+  // A cash booking has no mandate to charge, so the fee is recorded and owed.
+  // Chasing it is a business decision, not something to fake here.
+  if (booking.paymentMethod === 'cash') return;
+
   // The fee is a charge, not a deduction, because nothing was ever taken. It is
   // recorded above first, so a gateway failure leaves it owed rather than lost.
   const outcome = await chargeCustomer({
@@ -466,8 +472,21 @@ export async function confirmTripDistance(
   if (!updated) return getMyBooking(customerUserId, bookingId);
 
   // Approving the distance is the customer agreeing the amount, so this is the
-  // moment to take it. Claiming the confirmation first means the charge runs
-  // exactly once - charging before claiming would let a double tap pay twice.
+  // moment it settles. Claiming the confirmation first means this runs exactly
+  // once - settling before claiming would let a double tap pay twice.
+  if (existing.paymentMethod === 'cash') {
+    // The customer hands the fare to the driver. Nothing moves through us, so
+    // there is nothing to charge and nothing that can fail - agreeing the
+    // distance is the whole settlement. Destow's commission on it becomes a
+    // receivable from the partner, who has collected the full fare; see
+    // getEarnings, where the two directions are kept apart.
+    await db
+      .update(bookings)
+      .set({ paymentStatus: 'paid', paidAt: new Date() })
+      .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
+    return getMyBooking(customerUserId, bookingId);
+  }
+
   const outcome = await chargeCustomer({
     userId: customerUserId,
     bookingId,
@@ -479,15 +498,14 @@ export async function confirmTripDistance(
       .update(bookings)
       .set({
         paymentStatus: 'paid',
-        paymentMethod: 'upi',
         transactionRef: outcome.paymentId,
         paidAt: new Date(),
       })
       .where(and(eq(bookings.id, bookingId), ne(bookings.paymentStatus, 'paid')));
   } else {
     // The trip happened and the distance is agreed, so the money is owed either
-    // way. Left unpaid and visible rather than rolled back - a customer with no
-    // payment method must not get a free trip by never adding one.
+    // way. Left unpaid and visible rather than rolled back - a customer whose
+    // mandate has gone must not get a free trip out of it.
     console.error(
       `[payments] booking ${bookingId} confirmed but not charged: ${outcome.reason}`,
     );
