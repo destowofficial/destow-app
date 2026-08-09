@@ -1,7 +1,20 @@
-import { and, count, eq } from 'drizzle-orm';
-import type { AvailableVehicle, RouteQuote, VehicleCategory } from '@destow/contracts';
+import { and, count, desc, eq, sql } from 'drizzle-orm';
+import type {
+  AvailableVehicle,
+  City,
+  PopularRoute,
+  RouteQuote,
+  VehicleCategory,
+} from '@destow/contracts';
 import { db } from '../../db/connection.js';
-import { vehicles, vehicleTypes, serviceProviders, platformSettings } from '../../db/schema.js';
+import {
+  vehicles,
+  vehicleTypes,
+  serviceProviders,
+  platformSettings,
+  cities,
+  bookings,
+} from '../../db/schema.js';
 import { resolveDistance } from '../../lib/adapters/route.js';
 import { computeFare } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
@@ -131,4 +144,36 @@ export async function listVehicleTypes() {
     })
     .from(vehicleTypes)
     .orderBy(vehicleTypes.category, vehicleTypes.name);
+}
+
+// The curated from/to list. Free text would let "Bangalore" and "Bengaluru"
+// become two routes, two Distance Matrix calls and two different fares for one
+// journey - so the app picks from here rather than typing.
+export async function listCities(): Promise<City[]> {
+  return db
+    .select({ id: cities.id, name: cities.name, state: cities.state })
+    .from(cities)
+    .where(eq(cities.isActive, true))
+    .orderBy(cities.name);
+}
+
+// Observed, not curated: the routes customers actually book. Empty until there
+// are bookings, which is honest - a hardcoded list would claim popularity we
+// have not seen, and this one improves itself.
+export async function listPopularRoutes(limit = 8): Promise<PopularRoute[]> {
+  const rows = await db
+    .select({
+      from: bookings.fromLocation,
+      to: bookings.toLocation,
+      bookings: count(),
+    })
+    .from(bookings)
+    // Cancelled trips are not demand. Counting them would let one customer
+    // book and cancel a route repeatedly to push it up the home screen.
+    .where(sql`${bookings.status} <> 'cancelled'`)
+    .groupBy(bookings.fromLocation, bookings.toLocation)
+    .orderBy(desc(count()))
+    .limit(limit);
+
+  return rows.map((r) => ({ from: r.from, to: r.to, bookings: r.bookings }));
 }

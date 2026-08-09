@@ -112,6 +112,23 @@ export const admins = pgTable(
   (t) => [uniqueIndex('admins_user_uidx').on(t.userId)],
 );
 
+// --- Cities (the from/to catalogue the app autocompletes against) --------------
+// Curated rather than free text. "Bangalore" and "Bengaluru" typed by two
+// customers would otherwise cache as two routes, cost two Distance Matrix calls
+// and quote two different distances - and therefore two different fares - for
+// one journey.
+export const cities = pgTable(
+  'cities',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    name: text('name').notNull(),
+    state: text('state').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('cities_name_uidx').on(t.name), index('cities_active_idx').on(t.isActive)],
+);
+
 // --- Service providers (agencies / fleet owners) ------------------------------
 export const serviceProviders = pgTable(
   'service_providers',
@@ -460,5 +477,6 @@ export const customersRelations = relations(customers, ({ one }) => ({
 
 export type Admin = typeof admins.$inferSelect;
 export type NewAdmin = typeof admins.$inferInsert;
+export type City = typeof cities.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
 export type NewCustomer = typeof customers.$inferInsert;

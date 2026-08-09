@@ -2,7 +2,7 @@ import { pathToFileURL } from 'node:url';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from './schema.js';
 import { ensureAdminBootstrap } from '../services/admin/admin-bootstrap.service.js';
-import { users, serviceProviders, vehicles, vehicleTypes, platformSettings } from './schema.js';
+import { users, serviceProviders, vehicles, vehicleTypes, platformSettings, cities } from './schema.js';
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -14,6 +14,45 @@ export async function seedDatabase(db: Db): Promise<void> {
   const settings = await db.select({ id: platformSettings.id }).from(platformSettings).limit(1);
   if (settings.length === 0) {
     await db.insert(platformSettings).values({ commissionBps: 1800 }); // 18%
+  }
+
+  // The from/to catalogue. Outstation demand concentrates on a handful of
+  // corridors, so this is the launch set rather than every Indian city - an
+  // admin adds more as routes open.
+  const existingCities = await db.select({ id: cities.id }).from(cities).limit(1);
+  if (existingCities.length === 0) {
+    await db.insert(cities).values([
+      { name: 'Delhi', state: 'Delhi' },
+      { name: 'Gurugram', state: 'Haryana' },
+      { name: 'Noida', state: 'Uttar Pradesh' },
+      { name: 'Agra', state: 'Uttar Pradesh' },
+      { name: 'Jaipur', state: 'Rajasthan' },
+      { name: 'Udaipur', state: 'Rajasthan' },
+      { name: 'Jodhpur', state: 'Rajasthan' },
+      { name: 'Chandigarh', state: 'Chandigarh' },
+      { name: 'Shimla', state: 'Himachal Pradesh' },
+      { name: 'Manali', state: 'Himachal Pradesh' },
+      { name: 'Dehradun', state: 'Uttarakhand' },
+      { name: 'Rishikesh', state: 'Uttarakhand' },
+      { name: 'Nainital', state: 'Uttarakhand' },
+      { name: 'Amritsar', state: 'Punjab' },
+      { name: 'Lucknow', state: 'Uttar Pradesh' },
+      { name: 'Varanasi', state: 'Uttar Pradesh' },
+      { name: 'Mumbai', state: 'Maharashtra' },
+      { name: 'Pune', state: 'Maharashtra' },
+      { name: 'Nashik', state: 'Maharashtra' },
+      { name: 'Lonavala', state: 'Maharashtra' },
+      { name: 'Goa', state: 'Goa' },
+      { name: 'Bengaluru', state: 'Karnataka' },
+      { name: 'Mysuru', state: 'Karnataka' },
+      { name: 'Coorg', state: 'Karnataka' },
+      { name: 'Chennai', state: 'Tamil Nadu' },
+      { name: 'Pondicherry', state: 'Puducherry' },
+      { name: 'Ooty', state: 'Tamil Nadu' },
+      { name: 'Hyderabad', state: 'Telangana' },
+      { name: 'Ahmedabad', state: 'Gujarat' },
+      { name: 'Kolkata', state: 'West Bengal' },
+    ]);
   }
 
   const types = await db.select({ id: vehicleTypes.id }).from(vehicleTypes).limit(1);

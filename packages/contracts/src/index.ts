@@ -10,6 +10,7 @@ export * from './users';
 export * from './providers';
 export * from './admin';
 export * from './search';
+export * from './geo';
 export * from './fleet';
 export * from './bookings';
 export * from './fulfilment';

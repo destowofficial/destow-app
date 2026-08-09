@@ -9,7 +9,7 @@ import { redis } from '@/db/redis.js';
 import { env } from '@/config/env.js';
 import {
   users, sessions, refreshTokens, platformSettings, customers, admins,
-  vehicles, vehicleTypes, bookings, serviceProviders,
+  vehicles, vehicleTypes, bookings, serviceProviders, cities,
 } from '@/db/schema.js';
 import { AppError } from '@/lib/http/errors.js';
 import { createSession, rotateRefresh, revokeSession, isRevoked } from '@/services/auth/session.service.js';
@@ -26,7 +26,12 @@ import {
   updateOtpSettings,
   setVehicleStatus,
 } from '@/services/admin/admin.service.js';
-import { searchRoute, listAvailableVehicles } from '@/services/search/search.service.js';
+import {
+  searchRoute,
+  listAvailableVehicles,
+  listCities,
+  listPopularRoutes,
+} from '@/services/search/search.service.js';
 import {
   createBooking,
   getMyBooking,
@@ -1835,4 +1840,111 @@ test('an oversized page size is clamped rather than honoured', async () => {
   const { owner } = await bookedTrip();
   const page = await listProviderBookings(owner.id, undefined, 1, 9999);
   expect(page.limit).toBeLessThanOrEqual(50);
+});
+
+// --- Customer flow completeness ------------------------------------------------
+// The gaps that stopped the mobile app leaving mock data: B2B details had no
+// endpoint, the home screen's two lists had no source, and the trip count was
+// not exposed.
+
+test('a business customer can record company details', async () => {
+  const user = await createUser();
+  const profile = await updateMe(user.id, {
+    customerType: 'business',
+    companyName: 'Acme Logistics',
+    gstin: '29ABCDE1234F1Z5',
+  });
+  expect(profile.customerType).toBe('business');
+  expect(profile.companyName).toBe('Acme Logistics');
+  expect(profile.gstin).toBe('29ABCDE1234F1Z5');
+  // Shape and normalization are the contract's job (controllers parse before
+  // the service is reached) and are covered in packages/contracts.
+});
+
+test('updating B2B details twice edits the same customer row', async () => {
+  const user = await createUser();
+  await updateMe(user.id, { customerType: 'business', companyName: 'First Ltd' });
+  await updateMe(user.id, { customerType: 'business', companyName: 'Second Ltd' });
+
+  const rows = await db.select().from(customers).where(eq(customers.userId, user.id));
+  expect(rows).toHaveLength(1);
+  expect(rows[0].companyName).toBe('Second Ltd');
+});
+
+// An individual customer never needs a customers row.
+test('an individual profile needs no customer row at all', async () => {
+  const user = await createUser();
+  await updateMe(user.id, { name: 'Solo Traveller' });
+  const rows = await db.select().from(customers).where(eq(customers.userId, user.id));
+  expect(rows).toHaveLength(0);
+});
+
+// Completed trips only - a pending or cancelled booking is not a trip taken.
+test('totalTrips counts completed trips only', async () => {
+  const { customer, owner, driver, booking } = await bookedTrip();
+  expect((await getMe(customer.id)).totalTrips).toBe(0);
+
+  await acceptBooking(owner.id, booking.id);
+  await assignDriver(owner.id, booking.id, driver.id);
+  await startTrip(owner.id, booking.id);
+  expect((await getMe(customer.id)).totalTrips).toBe(0); // running, not taken
+
+  await completeTrip(owner.id, booking.id);
+  expect((await getMe(customer.id)).totalTrips).toBe(1);
+});
+
+test('the city catalogue is served and sorted', async () => {
+  // The test database is migrated but not seeded, so supply the catalogue here
+  // rather than depending on seed data this suite does not control.
+  await db
+    .insert(cities)
+    .values([
+      { name: 'Zzz Testville', state: 'Test' },
+      { name: 'Aaa Testville', state: 'Test' },
+      { name: 'Mmm Testville', state: 'Test', isActive: false },
+    ])
+    .onConflictDoNothing();
+
+  const list = await listCities();
+  // The inactive one must not appear - an admin turning a city off should take
+  // it out of the picker.
+  expect(list.find((c) => c.name === 'Mmm Testville')).toBeUndefined();
+  expect(list.length).toBeGreaterThan(0);
+  const names = list.map((c) => c.name);
+  expect([...names].sort()).toEqual(names);
+  expect(list.every((c) => c.state.length > 0)).toBe(true);
+});
+
+// Observed rather than curated: these are the routes people actually book.
+test('popular routes reflect real bookings', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  for (let i = 1; i <= 2; i++) {
+    await createBooking(customer.id, {
+      vehicleId: vehicle.id,
+      from: 'Delhi',
+      to: 'Manali',
+      pickupDatetime: new Date(Date.now() + (2000 + i * 200) * 3600 * 1000),
+      tripType: 'one_way',
+    });
+  }
+  const routes = await listPopularRoutes();
+  const delhiManali = routes.find((r) => r.from === 'Delhi' && r.to === 'Manali');
+  expect(delhiManali).toBeDefined();
+  expect(delhiManali!.bookings).toBeGreaterThanOrEqual(2);
+});
+
+// Otherwise one customer could book and cancel a route repeatedly to push it up
+// the home screen.
+test('cancelled trips do not count as demand', async () => {
+  const customer = await createUser();
+  const { vehicle } = await bookableVehicle(1000);
+  const b = await createBooking(customer.id, {
+    vehicleId: vehicle.id, from: 'Kolkata', to: 'Digha',
+    pickupDatetime: new Date(Date.now() + 2600 * 3600 * 1000), tripType: 'one_way',
+  });
+  await cancelMyBooking(customer.id, b.id);
+
+  const routes = await listPopularRoutes();
+  expect(routes.find((r) => r.from === 'Kolkata' && r.to === 'Digha')).toBeUndefined();
 });
