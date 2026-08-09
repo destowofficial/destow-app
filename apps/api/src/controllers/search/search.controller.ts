@@ -4,6 +4,8 @@ import {
   searchRoute,
   listAvailableVehicles,
   listVehicleTypes,
+  listCities,
+  listPopularRoutes,
 } from '../../services/search/search.service.js';
 import { parseOrThrow } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
@@ -21,4 +23,12 @@ export async function availableVehiclesController(req: Request, res: Response) {
 
 export async function vehicleTypesController(_req: Request, res: Response) {
   ok(res, { vehicleTypes: await listVehicleTypes() });
+}
+
+export async function citiesController(_req: Request, res: Response) {
+  ok(res, { cities: await listCities() });
+}
+
+export async function popularRoutesController(_req: Request, res: Response) {
+  ok(res, { routes: await listPopularRoutes() });
 }

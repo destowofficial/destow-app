@@ -3,6 +3,8 @@ import {
   searchController,
   availableVehiclesController,
   vehicleTypesController,
+  citiesController,
+  popularRoutesController,
 } from '../controllers/search/search.controller.js';
 import { requireAuth } from '../middleware/auth/auth.js';
 import { rateLimit } from '../middleware/ratelimit/ratelimit.js';
@@ -25,3 +27,8 @@ searchRouter.post('/vehicles/available', availableVehiclesController);
 // The catalog a partner lists against and a customer filters by. No maps call,
 // so it sits outside the quote limiter's purpose but harmlessly inside it.
 searchRouter.get('/vehicle-types', vehicleTypesController);
+
+// The home screen's two lists: where you can go, and where people are going.
+// Neither calls the maps provider, so neither costs anything per request.
+searchRouter.get('/cities', citiesController);
+searchRouter.get('/routes/popular', popularRoutesController);
