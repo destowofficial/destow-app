@@ -3,8 +3,15 @@
   "compilerOptions": {
     "strict": true,
     "paths": {
-      "@/*": ["./*"]
-    }
+      "@/*": [
+        "./*"
+      ]
+    },
+    "types": [
+      "bun-types",
+      "@hugeicons/core-free-icons",
+      "@hugeicons/react-native"
+    ]
   },
   "include": [
     "**/*.ts",

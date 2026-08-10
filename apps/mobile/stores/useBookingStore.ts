@@ -1,54 +1,77 @@
 import { create } from 'zustand';
-import { FareBreakdown, Vehicle } from '../services/types';
+import type { AvailableVehicle, RouteQuote } from '@destow/contracts';
 
-interface BookingState {
-  fromCity: string;
-  toCity: string;
-  travelDate: string;
-  passengers: number;
-  selectedVehicle: Vehicle | null;
-  distance: number;
-  fareBreakdown: FareBreakdown | null;
-  isSearching: boolean;
+// What the customer has chosen so far, held across the booking screens.
+//
+// Nothing here reaches money. The fare shown on the review screen comes from the
+// server's own listing, and the booking is created from a vehicle id and two
+// dates - the server routes the distance and computes the price itself, so a
+// value tampered with in this store changes what is displayed and nothing else.
 
-  setFromCity: (city: string) => void;
-  setToCity: (city: string) => void;
-  setTravelDate: (date: string) => void;
-  setPassengers: (count: number) => void;
-  selectVehicle: (vehicle: Vehicle) => void;
-  setDistance: (distance: number) => void;
-  setFareBreakdown: (fare: FareBreakdown) => void;
-  setIsSearching: (loading: boolean) => void;
-  swapCities: () => void;
-  resetBooking: () => void;
+export interface Draft {
+  from: string;
+  to: string;
+  /**
+   * Places to call at on the way out, in order. A round trip to Manali that
+   * takes in Shimla is one hire, not two, so these belong to the journey rather
+   * than being separate bookings.
+   */
+  stops: string[];
+  /**
+   * Departure only. Trips are round trips, but the customer never states a
+   * return - it is estimated from the route when the booking is created, so
+   * there is nothing here to hold.
+   */
+  pickup: Date | null;
+  vehicle: AvailableVehicle | null;
+  route: RouteQuote | null;
 }
 
-const initialState = {
-  fromCity: '',
-  toCity: '',
-  travelDate: '',
-  passengers: 1,
-  selectedVehicle: null,
-  distance: 0,
-  fareBreakdown: null,
-  isSearching: false,
+interface BookingState extends Draft {
+  setRoute: (r: { from: string; to: string }) => void;
+  setStop: (index: number, place: string) => void;
+  addStop: (place: string) => void;
+  removeStop: (index: number) => void;
+  setDates: (d: { pickup?: Date }) => void;
+  setVehicle: (v: AvailableVehicle, route: RouteQuote) => void;
+  reset: () => void;
+}
+
+const empty: Draft = {
+  from: '',
+  to: '',
+  stops: [],
+  pickup: null,
+  vehicle: null,
+  route: null,
 };
 
 export const useBookingStore = create<BookingState>((set) => ({
-  ...initialState,
+  ...empty,
 
-  setFromCity: (city) => set({ fromCity: city }),
-  setToCity: (city) => set({ toCity: city }),
-  setTravelDate: (date) => set({ travelDate: date }),
-  setPassengers: (count) => set({ passengers: count }),
-  selectVehicle: (vehicle) => set({ selectedVehicle: vehicle }),
-  setDistance: (distance) => set({ distance }),
-  setFareBreakdown: (fare) => set({ fareBreakdown: fare }),
-  setIsSearching: (loading) => set({ isSearching: loading }),
-  swapCities: () =>
-    set((state) => ({
-      fromCity: state.toCity,
-      toCity: state.fromCity,
+  setRoute: ({ from, to }) =>
+    // Changing either end invalidates the vehicle: it was priced for the old
+    // route, and showing that fare against a new one would be a lie.
+    set({ from, to, vehicle: null, route: null }),
+
+  setDates: ({ pickup }) => set((st) => ({ pickup: pickup ?? st.pickup })),
+
+  // Every change to the itinerary invalidates the vehicle for the same reason
+  // changing either end does: it was priced for a different journey.
+  setStop: (index, place) =>
+    set((st) => ({
+      stops: st.stops.map((p, i) => (i === index ? place : p)),
+      vehicle: null,
+      route: null,
     })),
-  resetBooking: () => set(initialState),
+
+  addStop: (place) =>
+    set((st) => ({ stops: [...st.stops, place], vehicle: null, route: null })),
+
+  removeStop: (index) =>
+    set((st) => ({ stops: st.stops.filter((_, i) => i !== index), vehicle: null, route: null })),
+
+  setVehicle: (vehicle, route) => set({ vehicle, route }),
+
+  reset: () => set(empty),
 }));

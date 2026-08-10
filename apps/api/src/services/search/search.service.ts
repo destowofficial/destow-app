@@ -5,7 +5,9 @@ import type {
   PopularRoute,
   RouteQuote,
   VehicleCategory,
+  PlaceSuggestion,
 } from '@destow/contracts';
+import { makePlacesProvider } from '../../lib/adapters/places.js';
 import { db } from '../../db/connection.js';
 import {
   vehicles,
@@ -167,7 +169,12 @@ export async function listCities(): Promise<City[]> {
 // screen, so it is the highest-traffic query in the product. An hour of
 // staleness in a "where people go" list costs nothing; the scan costs the box.
 const POPULAR_ROUTES_TTL_SEC = 60 * 60;
-const POPULAR_ROUTES_KEY = 'popular_routes';
+// The version is part of the key so that changing the shape of a row retires
+// the old entries instead of serving them. Without it a deploy that adds a
+// field keeps handing clients rows that lack it for up to an hour, and the
+// client renders the gap - which is exactly how `NaN km` reached the home
+// screen. Bump this whenever PopularRoute gains or loses a field.
+const POPULAR_ROUTES_KEY = 'popular_routes:v2';
 
 // Single-flight per process. The route cache can skip this because its keys are
 // per city pair and rarely contended, but this is one hot key shared by every
@@ -236,6 +243,11 @@ async function computePopularRoutes(limit: number): Promise<PopularRoute[]> {
       from: bookings.fromLocation,
       to: bookings.toLocation,
       bookings: count(),
+      // Averaged because the same city pair can be routed slightly differently
+      // between trips, and the cheapest fare actually charged rather than a
+      // fresh quote - the home screen must not cost a maps call per row.
+      distanceM: sql<number>`round(avg(${bookings.distanceM}))::int`,
+      fromFarePaise: sql<number>`min(${bookings.totalFarePaise})::int`,
     })
     .from(bookings)
     // Cancelled trips are not demand. Counting them would let one customer
@@ -245,5 +257,30 @@ async function computePopularRoutes(limit: number): Promise<PopularRoute[]> {
     .orderBy(desc(count()))
     .limit(limit);
 
-  return rows.map((r) => ({ from: r.from, to: r.to, bookings: r.bookings }));
+  return rows.map((r) => ({
+    from: r.from,
+    to: r.to,
+    bookings: r.bookings,
+    distanceM: Number(r.distanceM ?? 0),
+    fromFarePaise: Number(r.fromFarePaise ?? 0),
+    fromFareDisplay: formatPaise(Number(r.fromFarePaise ?? 0)),
+  }));
+}
+
+
+// Place search, backed by the maps provider.
+//
+// Deliberately not a filter over `cities`: that table is the catalog partners
+// list against, not the set of places a customer may ask for. Someone going to
+// a village outside Rishikesh must be able to type it.
+const places = makePlacesProvider(async () => {
+  const rows = await listCities();
+  return rows.map((c) => ({ name: c.name, state: c.state }));
+});
+
+export async function suggestPlaces(query: string): Promise<PlaceSuggestion[]> {
+  // One or two letters match half of India and cost a billed call to learn it.
+  const q = query.trim();
+  if (q.length < 3) return [];
+  return places.suggest(q);
 }

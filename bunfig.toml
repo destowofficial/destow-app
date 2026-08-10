@@ -1,0 +1,7 @@
+[install]
+# Expo's Metro resolver expects a flat, npm-style node_modules. Bun's default
+# isolated layout puts each package under .bun/<name>@<version>+<peer-hash>/,
+# which produces several apparent "copies" of expo and - the one that actually
+# breaks things - expo-modules-core, whose duplication makes the native module
+# registry initialise twice and resolution fail.
+linker = "hoisted"

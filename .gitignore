@@ -49,3 +49,8 @@ docker-compose.override.yml
 docs/*
 !docs/ARCHITECTURE.md
 !docs/TARGETS.md
+
+# City photographs for the mobile app: ~2MB of regenerable Wikimedia Commons
+# files. Fetch them with 'make city-photos'; the app falls back to pin tiles
+# without them. credits.json IS committed - the licences require attribution.
+apps/mobile/assets/cities/*.jpg

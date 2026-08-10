@@ -1,288 +1,219 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../theme/colors';
-import { typography } from '../../theme/typography';
-import { spacing, radii, shadows } from '../../theme/spacing';
-import { SearchCard } from '../../components/cards/SearchCard';
-import { PopularRouteCard } from '../../components/cards/PopularRouteCard';
-import { LoadingSkeleton } from '../../components/ui/LoadingSkeleton';
-import { fetchPopularRoutes } from '../../services/api';
-import type { PopularRoute } from '../../services/types';
+import React, { useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { ErrorState, Label, Loading, Screen, Small } from '../../components/ui/kit';
+import { DestinationSheet } from '../../components/DestinationSheet';
+import { Icon } from '../../components/ui/Icon';
+import { Logo } from '../../components/ui/Logo';
+import { cityPhoto } from '../../assets/cities';
+import { color, radius, shadow, weight } from '../../theme/tokens';
+import { f, s } from '../../theme/responsive';
+import { listCities, listPopularRoutes } from '../../services/destow';
+import { useAsync } from '../../hooks/useAsync';
+import { km } from '../../lib/format';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { useBookingStore } from '../../stores/useBookingStore';
 
+// One job, one control: say where you are going.
+//
+// Everything else a trip needs - the pickup address, the dates - is asked for
+// on the next screen, once there is a destination to hang it on. A home screen
+// that asks for four things at once gets none of them.
 export default function Home() {
-  const router = useRouter();
-  const [popularRoutes, setPopularRoutes] = useState<PopularRoute[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { fromCity, toCity, setFromCity, setToCity } = useBookingStore();
+  const user = useAuthStore((st) => st.user);
+  const setRoute = useBookingStore((st) => st.setRoute);
+  const [picking, setPicking] = useState(false);
 
-  useEffect(() => {
-    loadPopularRoutes();
-  }, []);
+  const routes = useAsync(listPopularRoutes, []);
+  const cities = useAsync(listCities, []);
 
-  const loadPopularRoutes = async () => {
-    setLoading(true);
-    const { data } = await fetchPopularRoutes();
-    setPopularRoutes(data);
-    setLoading(false);
-  };
+  const first = user?.name?.split(' ')[0];
+  const popular = routes.data ?? [];
+  const onShelf = new Set(popular.map((r) => r.to));
+  const elsewhere = (cities.data ?? []).filter((c) => !onShelf.has(c.name)).slice(0, 8);
+
+  function choose(to: string) {
+    setPicking(false);
+    setRoute({ from: '', to });
+    router.push('/(booking)/plan');
+  }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <LinearGradient
-          colors={colors.primary.gradient as any}
-          style={styles.header}
+    <Screen ground={color.blue}>
+      <View style={styles.head}>
+        <Text style={styles.title}>{first ? `Where to, ${first}?` : 'Where to?'}</Text>
+        <Text style={styles.sub}>
+          {cities.data?.length
+            ? `Outstation round trips across Indida`
+            : 'Outstation round trips'}
+        </Text>
+
+        <Pressable
+          onPress={() => setPicking(true)}
+          style={({ pressed }) => [styles.search, pressed && styles.searchPressed]}
+          accessibilityRole="search"
+          accessibilityLabel="Where do you want to go?"
         >
-          <View style={styles.headerRow}>
-            <View style={styles.headerLeft}>
-              <Image
-                source={require('../../assets/logo.png')}
-                style={styles.headerLogo}
-                resizeMode="contain"
-              />
-              <View>
-                <Text style={styles.headerTitle}>DESTOW</Text>
-                <Text style={styles.headerSubtitle}>Your Journey Awaits</Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              onPress={() => router.push('/(tabs)/profile')}
-              style={styles.profileButton}
-              activeOpacity={0.7}
-              accessibilityLabel="Go to profile"
-            >
-              <Ionicons name="person" size={20} color={colors.white} />
-            </TouchableOpacity>
-          </View>
+          <Logo height={s(17)} />
+          <View style={styles.markRule} />
+          <Text style={styles.placeholder}>Where do you want to go?</Text>
+          <Icon name="search" size={19} color={color.blue} />
+        </Pressable>
+      </View>
 
-          <View style={styles.searchCardContainer}>
-            <SearchCard
-              from={fromCity || undefined}
-              to={toCity || undefined}
-              onPress={() => router.push('/(booking)/search')}
+      <View style={styles.sheet}>
+        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+
+          {routes.loading && cities.loading ? (
+            <Loading />
+          ) : routes.error && cities.error ? (
+            <ErrorState
+              message={routes.error}
+              onRetry={() => {
+                routes.reload();
+                cities.reload();
+              }}
             />
-          </View>
-        </LinearGradient>
-
-        {/* Choose Your Ride */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Choose Your Ride</Text>
-          <View style={styles.serviceGrid}>
-            <TouchableOpacity
-              onPress={() => router.push('/(booking)/search')}
-              activeOpacity={0.8}
-              style={styles.serviceCard}
-            >
-              <View style={[styles.serviceIcon, { backgroundColor: colors.primary[50] }]}>
-                <Ionicons name="bus" size={28} color={colors.primary[600]} />
-              </View>
-              <Text style={styles.serviceName}>Bus</Text>
-              <Text style={styles.serviceDesc}>Comfortable travel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => router.push('/(booking)/search')}
-              activeOpacity={0.8}
-              style={styles.serviceCard}
-            >
-              <View style={[styles.serviceIcon, { backgroundColor: colors.success[50] }]}>
-                <Ionicons name="car" size={28} color={colors.success[600]} />
-              </View>
-              <Text style={styles.serviceName}>Car</Text>
-              <Text style={styles.serviceDesc}>Private & flexible</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Value Proposition */}
-          <LinearGradient
-            colors={[colors.success[500], colors.primary[600]]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.valueBanner}
-          >
-            <View style={styles.valueIcon}>
-              <Ionicons name="star" size={24} color={colors.white} />
-            </View>
-            <View>
-              <Text style={styles.valueTitle}>Transparent ₹/km Pricing</Text>
-              <Text style={styles.valueDesc}>No hidden charges, ever!</Text>
-            </View>
-          </LinearGradient>
-        </View>
-
-        {/* Popular Routes */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Popular Routes</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
-          </View>
-          {loading ? (
-            <LoadingSkeleton count={3} variant="listItem" />
           ) : (
-            <View style={styles.routesList}>
-              {popularRoutes.map((route, index) => (
-                <PopularRouteCard
-                  key={index}
-                  route={route}
-                  onPress={() => {
-                    setFromCity(route.from);
-                    setToCity(route.to);
-                    router.push('/(booking)/search');
-                  }}
-                />
-              ))}
-            </View>
-          )}
-        </View>
+            <>
+              {/* Observed from real bookings, so this shelf is one tile or none
+                  on a young deployment - and an empty shelf is not drawn. */}
+              {popular.length > 0 ? (
+                <>
+                  <Label style={styles.shelfLabel}>Popular right now</Label>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.reel}
+                  >
+                    {popular.slice(0, 6).map((r) => (
+                      <Pressable
+                        key={`${r.from}-${r.to}`}
+                        onPress={() => choose(r.to)}
+                        style={({ pressed }) => [styles.tile, pressed && styles.tilePressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${r.from} to ${r.to}`}
+                      >
+                        <PhotoTile name={r.to} />
+                        <View style={styles.tileText}>
+                          <Text style={styles.tileName}>{r.to}</Text>
+                          <Small>{km(r.distanceM) || `from ${r.from}`}</Small>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </>
+              ) : null}
 
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </SafeAreaView>
+              {/* Everywhere else we go. With one popular route the screen would
+                  otherwise be nine tenths empty, which reads as broken rather
+                  than new - this is the content that makes it a screen. */}
+              {elsewhere.length > 0 ? (
+                <>
+                  <Label style={styles.shelfLabel}>Where we run</Label>
+                  <View style={styles.grid}>
+                    {elsewhere.map((c) => (
+                      <Pressable
+                        key={c.id}
+                        onPress={() => choose(c.name)}
+                        style={({ pressed }) => [styles.cell, pressed && styles.tilePressed]}
+                        accessibilityRole="button"
+                        accessibilityLabel={c.name}
+                      >
+                        <PhotoTile name={c.name} />
+                        <View style={styles.tileText}>
+                          <Text style={styles.tileName}>{c.name}</Text>
+                          <Small>{c.state}</Small>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                </>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
+      </View>
+
+      <DestinationSheet
+        open={picking}
+        onClose={() => setPicking(false)}
+        onPick={choose}
+        cities={cities.data ?? []}
+        popular={popular}
+      />
+    </Screen>
   );
 }
 
+function PhotoTile({ name }: { name: string }) {
+  const photo = cityPhoto(name);
+  if (!photo) {
+    return (
+      <View style={[styles.tilePhoto, styles.tileFallback]}>
+        <Text style={styles.tileLetter}>{name[0]}</Text>
+      </View>
+    );
+  }
+  return <Image source={photo} style={styles.tilePhoto} resizeMode="cover" />;
+}
+
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.primary[600],
+  head: {
+    backgroundColor: color.blue,
+    paddingHorizontal: s(18),
+    paddingTop: s(4),
+    paddingBottom: s(18),
   },
-  container: {
-    flex: 1,
-    backgroundColor: colors.neutral[50],
-  },
-  header: {
-    paddingTop: spacing.base,
-    paddingBottom: spacing.xxxl,
-    paddingHorizontal: spacing.base,
-    borderBottomLeftRadius: radii.xxl,
-    borderBottomRightRadius: radii.xxl,
-    ...shadows.lg,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  headerLeft: {
+  title: { color: color.white, fontSize: f(21), fontWeight: weight.black, letterSpacing: -0.6 },
+  sub: { color: 'rgba(255,255,255,0.82)', fontSize: f(13), marginTop: s(3) },
+
+  sheet: { flex: 1, backgroundColor: color.bg },
+  body: { paddingBottom: s(28), paddingTop: s(4) },
+
+  // Lifted over the seam between the blue and the ground so the control reads
+  // as the subject of the screen rather than the first row of a list.
+  search: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: s(12),
+    marginTop: s(16),
+    paddingHorizontal: s(16),
+    paddingVertical: s(16),
+    backgroundColor: color.card,
+    borderRadius: radius.xl,
+    ...shadow.md,
   },
-  headerLogo: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-  },
-  headerTitle: {
-    fontSize: typography.sizes.xl,
-    fontFamily: `${typography.fontFamily}_700Bold`,
-    color: colors.white,
-  },
-  headerSubtitle: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 2,
-  },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchCardContainer: {
-    marginTop: spacing.sm,
-  },
-  section: {
-    paddingHorizontal: spacing.base,
-    paddingTop: spacing.xl,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.base,
-  },
-  sectionTitle: {
-    fontSize: typography.sizes.lg,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.neutral[900],
-    marginBottom: spacing.base,
-  },
-  seeAll: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.primary[600],
-  },
-  serviceGrid: {
-    flexDirection: 'row',
-    gap: spacing.base,
-    marginBottom: spacing.base,
-  },
-  serviceCard: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderRadius: radii.xl,
-    padding: spacing.lg,
+  searchPressed: { backgroundColor: color.blueWash },
+  markRule: { width: 1, height: f(20), backgroundColor: color.line },
+  placeholder: { flex: 1, fontSize: f(15.5), fontWeight: weight.semi, color: color.dim },
+
+  shelfLabel: { marginTop: s(20), marginBottom: s(10), paddingHorizontal: s(18) },
+  reel: { paddingHorizontal: s(18), gap: s(12) },
+  tile: {
+    width: s(150),
+    backgroundColor: color.card,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.neutral[100],
-    ...shadows.sm,
+    borderColor: color.line,
+    overflow: 'hidden',
   },
-  serviceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing.md,
+  tilePressed: { borderColor: color.blueBorder },
+  tilePhoto: { width: '100%', height: s(96), backgroundColor: color.line },
+  tileFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: color.blueWash },
+  tileLetter: { fontSize: f(30), fontWeight: weight.black, color: color.blue },
+  tileText: { padding: s(11), gap: s(2) },
+  // Two to a row, sized off the gap rather than a fixed width so it holds from
+  // a small phone to a tablet.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: s(12), paddingHorizontal: s(18) },
+  cell: {
+    width: '47.5%',
+    flexGrow: 1,
+    backgroundColor: color.card,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.line,
+    overflow: 'hidden',
   },
-  serviceName: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.neutral[900],
-    marginBottom: 2,
-  },
-  serviceDesc: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[500],
-  },
-  valueBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    padding: spacing.base,
-    borderRadius: radii.xl,
-  },
-  valueIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  valueTitle: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_700Bold`,
-    color: colors.white,
-  },
-  valueDesc: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: 'rgba(255,255,255,0.9)',
-  },
-  routesList: {
-    gap: spacing.base,
-  },
+  tileName: { fontSize: f(15), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.2 },
 });

@@ -1,274 +1,154 @@
 import React, { useState } from 'react';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { router } from 'expo-router';
 import {
-  View,
-  Text,
-  TextInput,
-  StyleSheet,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { GradientButton } from '../../components/ui/GradientButton';
-import { sendOtp } from '../../services/api';
+  Button,
+  Footer,
+  H1,
+  Label,
+  P,
+  Screen,
+  Small,
+} from '../../components/ui/kit';
+import { Logo } from '../../components/ui/Logo';
+import { color, radius, weight } from '../../theme/tokens';
+import { f, s } from '../../theme/responsive';
+import { requestOtp } from '../../services/destow';
+import { ApiError, NetworkError } from '../../services/http';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { colors } from '../../theme/colors';
-import { typography } from '../../theme/typography';
-import { spacing, radii, shadows } from '../../theme/spacing';
+
+// The only identity a customer ever types. There is no password anywhere in
+// this app - the number is proved by OTP and that is the whole of it.
+
+// Indian mobiles: ten digits starting 6-9. Checked here so an obviously wrong
+// number never costs a send, and so the server's own rejection is a surprise
+// rather than the normal case.
+const VALID = /^[6-9]\d{9}$/;
 
 export default function Login() {
-  const router = useRouter();
-  const { setPendingPhone, setLoading, isLoading } = useAuthStore();
-  const [phone, setPhone] = useState('');
-  const [error, setError] = useState('');
+  const setPendingPhone = useAuthStore((st) => st.setPendingPhone);
+  const [digits, setDigits] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const formatPhone = (text: string) => {
-    const digits = text.replace(/\D/g, '').slice(0, 10);
-    setPhone(digits);
-    setError('');
-  };
+  const ready = VALID.test(digits);
 
-  const handleSendOtp = async () => {
-    if (phone.length !== 10) {
-      setError('Please enter a valid 10-digit phone number');
-      return;
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const sent = await requestOtp(digits);
+      // devCode is present only when the server is running with OTP_DEV_ECHO,
+      // which it refuses to do in production.
+      setPendingPhone(digits, sent.devCode ?? null);
+      router.push('/(auth)/otp');
+    } catch (e) {
+      if (e instanceof NetworkError) {
+        setError('No connection. Check your network and try again.');
+      } else if (e instanceof ApiError) {
+        // Rate limits key on the number, so the wait is the message that
+        // matters - not a generic failure.
+        setError(e.fieldError('phone') ?? e.error);
+      } else {
+        setError('Something went wrong. Try again.');
+      }
+    } finally {
+      setBusy(false);
     }
-
-    setLoading(true);
-    const { data, error: apiError } = await sendOtp(phone);
-
-    if (apiError) {
-      setError(apiError);
-      setLoading(false);
-      return;
-    }
-
-    setPendingPhone(phone);
-    setLoading(false);
-    router.push({
-      pathname: '/(auth)/otp',
-      params: { phone, otp: data.otp },
-    });
-  };
+  }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <Screen>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <LinearGradient
-          colors={colors.primary.gradient as any}
-          style={styles.header}
-        >
-          <TouchableOpacity
-            onPress={() => router.back()}
-            style={styles.backButton}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="arrow-back" size={20} color={colors.white} />
-          </TouchableOpacity>
-        </LinearGradient>
-
-        <View style={styles.content}>
-          <View style={styles.logoContainer}>
-            <Image
-              source={require('../../assets/logo.png')}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+        <View style={styles.body}>
+          <View style={styles.brand}>
+            <Logo height={s(46)} />
           </View>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>
-            Enter your phone number to continue
-          </Text>
 
-          <View style={styles.phoneInputContainer}>
-            <View style={styles.countryCode}>
-              <Text style={styles.countryCodeText}>+91</Text>
+          <View style={styles.fill}>
+            <View style={styles.intro}>
+              <H1>Your number</H1>
+              <P style={[{ fontSize: f(14) }, styles.introText]}>
+                We&apos;ll text you a six-digit code to confirm it.
+              </P>
             </View>
-            <TextInput
-              value={phone}
-              onChangeText={formatPhone}
-              placeholder="Enter phone number"
-              placeholderTextColor={colors.neutral[400]}
-              keyboardType="phone-pad"
-              maxLength={10}
-              style={styles.phoneInput}
-            />
-          </View>
 
-          {error ? (
-            <Text style={styles.errorText}>{error}</Text>
-          ) : null}
+            <View style={[styles.entry, digits.length > 0 && styles.entryFocused]}>
+              <Label>Mobile</Label>
+              <View style={styles.entryRow}>
+              <Text style={styles.country}>+91</Text>
+              <View style={styles.entryDivider} />
+              <TextInput
+                value={digits}
+                onChangeText={(t) => {
+                  setDigits(t.replace(/\D/g, '').slice(0, 10));
+                  setError(null);
+                }}
+                keyboardType="number-pad"
+                textContentType="telephoneNumber"
+                autoComplete="tel"
+                placeholder="98765 43210"
+                placeholderTextColor={color.dim}
+                style={styles.input}
+                maxLength={10}
+                autoFocus
+                accessibilityLabel="Mobile number"
+              />
+              </View>
+            </View>
 
-          <Text style={styles.hint}>
-            We'll send you a one-time password (OTP) to verify your number
-          </Text>
-
-          <GradientButton
-            title="Send OTP"
-            onPress={handleSendOtp}
-            disabled={phone.length !== 10}
-            loading={isLoading}
-            icon={<Ionicons name="arrow-forward" size={20} color={colors.white} />}
-          />
-
-          <View style={styles.signupRow}>
-            <Text style={styles.signupText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/signup')}>
-              <Text style={styles.signupLink}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.demoSection}>
-            <Text style={styles.demoTitle}>Demo Accounts</Text>
-            <Text style={styles.demoText}>
-              Phone: 9876543210{'\n'}OTP: 123456
-            </Text>
-            <Text style={styles.demoText}>
-              Phone: 9123456789{'\n'}OTP: 654321
-            </Text>
+            {error ? <Text style={styles.error}>{error}</Text> : null}
           </View>
         </View>
+
+        <Footer>
+          <Button label="Send code" onPress={send} loading={busy} disabled={!ready} />
+          <Small style={styles.legal}>
+            By continuing you agree to the Terms and Privacy Policy.
+          </Small>
+        </Footer>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: colors.white,
-  },
-  flex: {
-    flex: 1,
-  },
-  header: {
-    height: 120,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingHorizontal: spacing.base,
-    paddingTop: spacing.base,
-    ...shadows.lg,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xxl,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  logo: {
-    width: 100,
-    height: 100,
-    borderRadius: 22,
-  },
-  title: {
-    fontSize: 28,
-    fontFamily: `${typography.fontFamily}_700Bold`,
-    color: colors.neutral[900],
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[500],
-    marginBottom: spacing.xxl,
-  },
-  phoneInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  countryCode: {
-    height: 56,
-    paddingHorizontal: spacing.base,
-    backgroundColor: colors.neutral[50],
-    borderRadius: radii.md,
-    borderWidth: 2,
-    borderColor: colors.neutral[200],
-    justifyContent: 'center',
-  },
-  countryCodeText: {
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.neutral[900],
-  },
-  phoneInput: {
-    flex: 1,
-    height: 56,
-    backgroundColor: colors.neutral[50],
-    borderRadius: radii.md,
-    borderWidth: 2,
-    borderColor: colors.neutral[200],
-    paddingHorizontal: spacing.base,
-    fontSize: typography.sizes.md,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[900],
-  },
-  errorText: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.danger[600],
-    marginBottom: spacing.sm,
-  },
-  hint: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[400],
-    marginBottom: spacing.xxl,
-    lineHeight: 20,
-  },
-  signupRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: spacing.xl,
-  },
-  signupText: {
-    fontSize: typography.sizes.base,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.neutral[500],
-  },
-  signupLink: {
-    fontSize: typography.sizes.base,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.primary[600],
-  },
-  demoSection: {
-    marginTop: spacing.xxxl,
-    padding: spacing.base,
-    backgroundColor: colors.primary[50],
-    borderRadius: radii.md,
+  flex: { flex: 1 },
+  // Centred rather than top-aligned. There are three things on this screen and
+  // stacking them under the notch leaves the bottom two thirds empty, which
+  // reads as an unfinished screen rather than a calm one.
+  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(30) },
+  // One composed block rather than a logo pinned to the ceiling and the rest
+  // floating in the middle: centring the content in *all* the leftover space
+  // left a dead band about a third of the screen tall under the wordmark.
+  fill: { paddingTop: s(30), gap: s(20) },
+  brand: { alignItems: 'center' },
+  introText: { textAlign: 'center' },
+  intro: { gap: s(7), alignItems: 'center' },
+  entry: {
+    gap: s(7),
+    backgroundColor: color.card,
+    borderRadius: radius.lg,
+    paddingHorizontal: s(14),
+    paddingVertical: s(13),
     borderWidth: 1,
-    borderColor: colors.primary[100],
+    borderColor: color.line,
   },
-  demoTitle: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_600SemiBold`,
-    color: colors.primary[700],
-    marginBottom: spacing.sm,
+  entryFocused: { borderWidth: 2, borderColor: color.blue },
+  entryRow: { flexDirection: 'row', alignItems: 'center', gap: s(11) },
+  country: { fontSize: f(16), fontWeight: weight.semi, color: color.sub },
+  entryDivider: { width: 1, height: f(22), backgroundColor: color.line },
+  input: {
+    flex: 1,
+    fontSize: f(17),
+    fontWeight: weight.semi,
+    color: color.ink,
+    letterSpacing: 0.4,
+    padding: 0,
   },
-  demoText: {
-    fontSize: typography.sizes.sm,
-    fontFamily: `${typography.fontFamily}_400Regular`,
-    color: colors.primary[600],
-    marginBottom: spacing.xs,
-    lineHeight: 20,
-  },
+  error: { fontSize: f(13), color: color.red, lineHeight: f(19), textAlign: 'center' },
+  legal: { textAlign: 'center', marginTop: s(12) },
 });
