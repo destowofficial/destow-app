@@ -28,5 +28,6 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Report all advisories (informational)
         run: bun audit || true
+
       - name: Fail on high/critical advisories
         run: bun audit --audit-level=high
