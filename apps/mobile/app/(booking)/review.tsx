@@ -18,6 +18,7 @@ import { f, s } from '../../theme/responsive';
 import { createBooking } from '../../services/destow';
 import { messageFor } from '../../hooks/useAsync';
 import { dayDate, time, km } from '../../lib/format';
+import { provisionalReturn } from '../../lib/trip';
 import { useBookingStore } from '../../stores/useBookingStore';
 
 // The last look before the vehicle is held.
@@ -30,7 +31,12 @@ export default function Review() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { vehicle, route, from, to, pickup, returnAt } = draft;
+  const { vehicle, route, from, to, pickup } = draft;
+
+  // The customer never gives a return date, so the vehicle's hold window is
+  // estimated from the route's own driving time. It is a hold, not a promise:
+  // the trip ends when the driver files the odometer.
+  const returnAt = pickup && route ? provisionalReturn(pickup, route.durationS) : null;
 
   // Reached only through the vehicle list, but a deep link or a restored
   // navigation state could land here without one.
@@ -106,10 +112,8 @@ export default function Review() {
             </Text>
           </Row>
           <Row style={styles.line}>
-            <Small>Returns</Small>
-            <Text style={styles.lineValue}>
-              {dayDate(returnAt)}, {time(returnAt)}
-            </Text>
+            <Small>Back by</Small>
+            <Text style={styles.lineValue}>{dayDate(returnAt)}</Text>
           </Row>
           <Row style={styles.line}>
             <Small>Vehicle</Small>

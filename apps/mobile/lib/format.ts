@@ -8,7 +8,11 @@ export function rupees(paise: number): string {
   return `₹${whole.toLocaleString('en-IN')}`;
 }
 
-export function km(metres: number): string {
+// Returns empty rather than "NaN km" when the figure is missing. A server that
+// stops sending a distance should cost us a blank, not a word the customer has
+// to decode.
+export function km(metres: number | null | undefined): string {
+  if (typeof metres !== 'number' || !Number.isFinite(metres)) return '';
   return `${Math.round(metres / 1000).toLocaleString('en-IN')} km`;
 }
 

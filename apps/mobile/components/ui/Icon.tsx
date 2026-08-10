@@ -15,6 +15,8 @@ import {
   Location01Icon,
   Mail01Icon,
   Menu01Icon,
+  Route01Icon,
+  ArrowDataTransferVerticalIcon,
   MinusSignIcon,
   Call02Icon,
   Search01Icon,
@@ -63,6 +65,10 @@ const GLYPH = {
   user: UserIcon,
   home: Home01Icon,
   list: Menu01Icon,
+  // A journey, not a menu: the Trips tab is a list of routes travelled.
+  trips: Route01Icon,
+  // Turning the journey round: pickup becomes destination and back again.
+  swap: ArrowDataTransferVerticalIcon,
   settings: Settings01Icon,
   signOut: Logout01Icon,
 } as const;

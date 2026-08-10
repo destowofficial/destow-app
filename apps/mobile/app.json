@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.destow.app"
+      "bundleIdentifier": "com.destow.app",
+      "config": {
+        "googleMapsApiKey": "$EXPO_PUBLIC_IOS_MAPS_KEY"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +20,12 @@
         "backgroundColor": "#ffffff",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.destow.app"
+      "package": "com.destow.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "$EXPO_PUBLIC_ANDROID_MAPS_KEY"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -35,7 +43,15 @@
       ],
       "expo-font",
       "expo-status-bar",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Destow uses your location to set your pickup point so the driver knows where to collect you.",
+          "locationWhenInUsePermission": "Destow uses your location to set your pickup point so the driver knows where to collect you.",
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

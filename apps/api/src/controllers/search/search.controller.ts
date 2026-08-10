@@ -6,6 +6,7 @@ import {
   listVehicleTypes,
   listCities,
   listPopularRoutes,
+  suggestPlaces,
 } from '../../services/search/search.service.js';
 import { parseOrThrow } from '../../lib/http/validate.js';
 import { ok } from '../../lib/http/response.js';
@@ -33,4 +34,9 @@ export async function citiesController(_req: Request, res: Response) {
 
 export async function popularRoutesController(_req: Request, res: Response) {
   ok(res, { routes: await listPopularRoutes() });
+}
+
+export async function placesController(req: Request, res: Response) {
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  ok(res, { places: await suggestPlaces(q) });
 }

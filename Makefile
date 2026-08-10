@@ -21,8 +21,8 @@ DEV_DB_URL := postgres://destow:destow_local@localhost:5434/destow
 DEV_SECRET := make_local_dev_secret_at_least_32_characters
 
 .DEFAULT_GOAL := help
-.PHONY: help install env validate up local down logs restart ps obs-up obs-down obs-logs obs-ps \
-        migrate seed db-generate backup restore mobile test test-integration \
+.PHONY: help install env validate up local down logs restart ps endpoints obs-up obs-down obs-logs obs-ps \
+        migrate seed db-generate backup restore mobile city-photos test test-integration \
         audit typecheck ci clean
 
 help:
@@ -35,6 +35,7 @@ help:
 	@echo "  make logs           Tail api + gateway logs"
 	@echo "  make restart        Recreate the api + gateway containers"
 	@echo "  make ps             Show stack status"
+	@echo "  make endpoints      Print the API URLs for this machine and for the phone"
 	@echo "  make obs-up         Start local observability (Prometheus, Grafana, Alertmanager, Blackbox)"
 	@echo "  make obs-down       Stop local observability"
 	@echo "  make obs-logs       Tail observability logs"
@@ -45,6 +46,7 @@ help:
 	@echo "  make backup         Back up the database to backups/ (timestamped dump)"
 	@echo "  make restore FILE=.. Restore the database from a dump file"
 	@echo "  make mobile         Start the Expo dev server"
+	@echo "  make city-photos    Fetch destination photos (optional; not in git)"
 	@echo "  make test           Backend unit + contracts tests (fast, no infra)"
 	@echo "  make test-integration  Integration tests (spins up db-test + redis)"
 	@echo "  make audit          Dependency vulnerability audit (whole workspace)"
@@ -75,8 +77,41 @@ validate:
 # --- Stack ------------------------------------------------------------------
 up local:
 	$(DC) up -d --build
-	@echo ""
-	@echo "Stack up. API via gateway: http://localhost:3000  (health: /health)"
+	@$(MAKE) --no-print-directory endpoints
+
+# Both addresses, because they are not interchangeable: this machine reaches the
+# API on localhost, but a phone or an emulator is a different host and needs the
+# LAN one. Printed after every `up` since the Wi-Fi address follows the DHCP
+# lease and changes without warning - a stale IP in the mobile .env looks
+# exactly like a broken API.
+endpoints:
+	@ip=$$( \
+	  ipconfig getifaddr en0 2>/dev/null \
+	  || ipconfig getifaddr en1 2>/dev/null \
+	  || { hostname -I 2>/dev/null | awk '{print $$1}'; } \
+	  || true ); \
+	echo ""; \
+	echo "Stack up."; \
+	echo ""; \
+	echo "  API   (this machine)  http://localhost:3000/api/v1"; \
+	if [ -n "$$ip" ]; then \
+	  echo "  API   (Wi-Fi / phone) http://$$ip:3000/api/v1"; \
+	else \
+	  echo "  API   (Wi-Fi / phone) — could not detect a LAN address; are you online?"; \
+	fi; \
+	echo "  Health                http://localhost:3000/health"; \
+	echo ""; \
+	if [ -n "$$ip" ] && [ -f $(MOBILE)/.env ]; then \
+	  want="http://$$ip:3000/api/v1"; \
+	  have=$$(grep -m1 '^EXPO_PUBLIC_API_URL=' $(MOBILE)/.env | cut -d= -f2-); \
+	  if [ "$$have" != "$$want" ]; then \
+	    echo "  ! $(MOBILE)/.env points at: $${have:-<unset>}"; \
+	    echo "    the phone needs:          $$want"; \
+	    echo "    fix it, then restart Metro (EXPO_PUBLIC_* is baked in at bundle time):"; \
+	    echo "      cd $(MOBILE) && bunx expo start --clear"; \
+	    echo ""; \
+	  fi; \
+	fi
 
 down:
 	$(DC) down
@@ -132,6 +167,11 @@ restore:
 	@echo "restored from $(FILE)"
 
 # --- Mobile -----------------------------------------------------------------
+# Optional: the photos are not in git, and the app falls back to pin tiles
+# without them.
+city-photos:
+	./scripts/city-photos.sh
+
 mobile:
 	cd $(MOBILE) && bun expo start
 

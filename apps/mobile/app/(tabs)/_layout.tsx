@@ -43,7 +43,7 @@ export default function TabsLayout() {
         options={{
           title: 'Trips',
           tabBarIcon: ({ color: c, focused }) => (
-            <TabIcon name="list" tint={c} focused={focused} />
+            <TabIcon name="trips" tint={c} focused={focused} />
           ),
         }}
       />

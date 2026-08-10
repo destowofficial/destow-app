@@ -5,6 +5,7 @@ import {
   vehicleTypesController,
   citiesController,
   popularRoutesController,
+  placesController,
 } from '../controllers/search/search.controller.js';
 import { requireAuth } from '../middleware/auth/auth.js';
 import { rateLimit } from '../middleware/ratelimit/ratelimit.js';
@@ -32,3 +33,7 @@ searchRouter.get('/vehicle-types', vehicleTypesController);
 // Neither calls the maps provider, so neither costs anything per request.
 searchRouter.get('/cities', citiesController);
 searchRouter.get('/routes/popular', popularRoutesController);
+
+// Typing costs a billed autocomplete call per keystroke the client lets
+// through, so this sits inside the quote limiter on purpose.
+searchRouter.get('/places', placesController);

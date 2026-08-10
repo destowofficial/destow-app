@@ -190,10 +190,8 @@ const styles = StyleSheet.create({
   chev: { fontSize: f(30), lineHeight: f(30), color: color.ink },
   // Same reasoning as the phone screen: six boxes and a countdown do not fill a
   // phone, so they sit in the middle rather than clinging to the top.
-  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(30) },
-  // The wordmark sits at the top; everything else centres in the space below
-  // it, so the screen reads as branded rather than as one floating block.
-  fill: { flex: 1, justifyContent: 'center', paddingBottom: s(48), gap: s(22) },
+  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(26) },
+  fill: { paddingTop: s(28), gap: s(20) },
   brand: { alignItems: 'center' },
   intro: { gap: s(7), alignItems: 'center' },
   change: { color: color.blue, fontWeight: weight.bold },

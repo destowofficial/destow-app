@@ -58,6 +58,12 @@ export default function Profile() {
           />
           <Divider style={styles.itemDivider} />
           <Item icon="help" label="Help and support" onPress={() => router.push('/help')} />
+          <Divider style={styles.itemDivider} />
+          <Item
+            icon="pin"
+            label="Photo credits"
+            onPress={() => router.push('/photo-credits')}
+          />
         </Card>
 
         <Card style={styles.menu}>

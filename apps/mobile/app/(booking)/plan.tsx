@@ -1,64 +1,60 @@
 import React, { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import {
-  Button,
-  Card,
-  Footer,
-  Header,
-  ErrorState,
-  Label,
-  Loading,
-  P,
-  Row,
-  Screen,
-  Small,
-} from '../../components/ui/kit';
-import { Icon, type IconName } from '../../components/ui/Icon';
+import { Button, Card, Footer, Header, Label, Screen, Small } from '../../components/ui/kit';
+import { DestinationSheet } from '../../components/DestinationSheet';
+import { DatePickerSheet } from '../../components/DatePickerSheet';
+import { Icon } from '../../components/ui/Icon';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
-import { listCities } from '../../services/destow';
+import { listCities, listPopularRoutes } from '../../services/destow';
 import { useAsync } from '../../hooks/useAsync';
 import { dayDate, time } from '../../lib/format';
 import { useBookingStore } from '../../stores/useBookingStore';
 
-// Where, and when there and back.
+// A dozen stops is a different product and a much longer quote, so the
+// itinerary is capped where a real outstation hire sits.
+const MAX_STOPS = 3;
+
+// Three answers: where from, where to, and when you leave.
 //
-// The return is required rather than optional: Destow sells round trips only,
-// and the return is what the vehicle's availability window is derived from -
-// without one the car would be freed while it was still hundreds of kilometres
-// away.
+// There is deliberately no return date. A round trip comes back when it comes
+// back - people extend by a day, weather closes a pass - and asking for a date
+// nobody can honestly give invites a wrong one. The fare is settled on the
+// kilometres actually run, so the return was never a price input; what it did
+// feed was the vehicle's availability window, and that is now estimated from
+// the route instead of typed by the customer.
 export default function Plan() {
   const draft = useBookingStore();
   const cities = useAsync(listCities, []);
+  const routes = useAsync(listPopularRoutes, []);
 
-  const [picking, setPicking] = useState<'from' | 'to' | null>(null);
+  type Target = 'from' | 'to' | { stop: number };
+  const [picking, setPicking] = useState<Target | null>(null);
+  const [pickingDate, setPickingDate] = useState(false);
 
-  // Sensible defaults so the screen is never empty: leaving in a week, back
-  // three days later, which is the shape of a Delhi-Manali trip.
   const pickup = draft.pickup ?? defaultPickup();
-  const returnAt = draft.returnAt ?? new Date(pickup.getTime() + 3 * 86_400_000);
 
-  const problem = useMemo(() => {
-    if (!draft.from || !draft.to) return 'Choose where you are going.';
-    if (draft.from === draft.to) return 'Pick two different places.';
-    if (pickup.getTime() <= Date.now()) return 'Pickup has to be in the future.';
-    if (returnAt.getTime() <= pickup.getTime()) return 'The return has to be after pickup.';
-    return null;
-  }, [draft.from, draft.to, pickup, returnAt]);
+  // The button carries the state on its own. Both ends chosen, different from
+  // each other, and a departure still to come - anything less and there is
+  // nothing to search for, which the disabled button already says.
+  const ready = useMemo(
+    () =>
+      !!draft.from &&
+      !!draft.to &&
+      draft.from !== draft.to &&
+      pickup.getTime() > Date.now(),
+    [draft.from, draft.to, pickup],
+  );
 
-  function next() {
-    draft.setDates({ pickup, returnAt });
-    router.push('/(booking)/vehicles');
+  // Turning the trip round is one tap, not two trips through the search sheet.
+  function swap() {
+    draft.setRoute({ from: draft.to, to: draft.from });
   }
 
-  function shift(which: 'pickup' | 'returnAt', days: number) {
-    if (which === 'pickup') {
-      const p = new Date(pickup.getTime() + days * 86_400_000);
-      draft.setDates({ pickup: p, returnAt: returnAt <= p ? new Date(p.getTime() + 86_400_000) : returnAt });
-    } else {
-      draft.setDates({ returnAt: new Date(returnAt.getTime() + days * 86_400_000) });
-    }
+  function next() {
+    draft.setDates({ pickup });
+    router.push('/(booking)/vehicles');
   }
 
   return (
@@ -66,147 +62,193 @@ export default function Plan() {
       <Header title="Plan your trip" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <Card style={styles.legs}>
-          <Pressable
-            style={styles.leg}
-            onPress={() => setPicking('from')}
-            accessibilityRole="button"
-            accessibilityLabel="Choose where you are travelling from"
-          >
-            <Icon name="dot" size={17} color={color.ok} />
-            <View style={styles.legText}>
-              <Label>From</Label>
-              <Text style={[styles.legValue, !draft.from && styles.placeholder]}>
-                {draft.from || 'Pick up from'}
-              </Text>
-            </View>
-          </Pressable>
-          <View style={styles.legDivider} />
-          <Pressable
-            style={styles.leg}
-            onPress={() => setPicking('to')}
-            accessibilityRole="button"
-            accessibilityLabel="Choose where you are going"
-          >
-            <Icon name="pin" size={17} color={color.red} />
-            <View style={styles.legText}>
-              <Label>To</Label>
-              <Text style={[styles.legValue, !draft.to && styles.placeholder]}>
-                {draft.to || 'Where are you going?'}
-              </Text>
-            </View>
-          </Pressable>
+        <Card lift style={styles.legs}>
+          {/* A rail rather than a divider: the dots, the line and the pin say
+              "one journey, several calls" at a glance, which flat rules do not.
+              It is drawn per row so it stays aligned as stops are added. */}
+          <View style={styles.stack}>
+            <RailRow first tint={color.ok}>
+              <Leg
+                label="Pickup"
+                value={draft.from}
+                placeholder="Where should we collect you?"
+                onPress={() => setPicking('from')}
+              />
+            </RailRow>
+
+            {draft.stops.map((stop, i) => (
+              <RailRow key={`${stop}-${i}`} tint={color.blue}>
+                <Leg
+                  label={`Stop ${i + 1}`}
+                  value={stop}
+                  placeholder="Where are you calling at?"
+                  onPress={() => setPicking({ stop: i })}
+                />
+                <Pressable
+                  onPress={() => draft.removeStop(i)}
+                  hitSlop={10}
+                  style={styles.drop}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove stop ${i + 1}`}
+                >
+                  <Icon name="cross" size={15} color={color.dim} />
+                </Pressable>
+              </RailRow>
+            ))}
+
+            <RailRow last tint={color.red}>
+              <Leg
+                label="Destination"
+                value={draft.to}
+                placeholder="Where are you going?"
+                onPress={() => setPicking('to')}
+              />
+              <Pressable
+                onPress={swap}
+                disabled={!draft.from && !draft.to}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.swap,
+                  pressed && styles.swapPressed,
+                  !draft.from && !draft.to && styles.swapOff,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Swap pickup and destination"
+              >
+                <Icon name="swap" size={16} color={color.sub} />
+              </Pressable>
+            </RailRow>
+          </View>
+
+          {/* A hire with a call on the way is still one hire. Capped, because a
+              dozen stops is a different product and a much longer quote. */}
+          {draft.stops.length < MAX_STOPS ? (
+            <Pressable
+              onPress={() => setPicking({ stop: draft.stops.length })}
+              style={({ pressed }) => [styles.addStop, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Add a stop"
+            >
+              <Icon name="plus" size={15} color={color.blue} />
+              <Text style={styles.addStopText}>Add a stop</Text>
+            </Pressable>
+          ) : null}
         </Card>
 
-        <DateRow
-          icon="calendar"
-          label="Departure"
-          value={`${dayDate(pickup)} · ${time(pickup)}`}
-          onEarlier={() => shift('pickup', -1)}
-          onLater={() => shift('pickup', 1)}
-        />
-        <DateRow
-          icon="calendar"
-          label="Return"
-          tint={color.ok}
-          value={`${dayDate(returnAt)} · ${time(returnAt)}`}
-          onEarlier={() => shift('returnAt', -1)}
-          onLater={() => shift('returnAt', 1)}
-        />
-
-        <Card tone="blue" style={styles.note}>
-          <Row style={{ justifyContent: 'flex-start', gap: s(10), alignItems: 'flex-start' }}>
-            <Icon name="info" size={17} color={color.blueDark} />
-            <Text style={styles.noteText}>
-              The vehicle and driver stay with you for the whole trip. You pay afterwards, for the
-              kilometres actually run.
-            </Text>
-          </Row>
+        <Card lift style={styles.date} onPress={() => setPickingDate(true)}>
+          <View style={styles.plate}>
+            <Icon name="calendar" size={19} color={color.blue} />
+          </View>
+          <View style={styles.dateText}>
+            <Label>Departure</Label>
+            <Text style={styles.value}>{dayDate(pickup)}</Text>
+            <Small>Pickup at {time(pickup)}</Small>
+          </View>
+          <Icon name="forward" size={17} color={color.dim} />
         </Card>
       </ScrollView>
 
       <Footer>
-        {problem ? <Small style={styles.problem}>{problem}</Small> : null}
-        <Button label="See available vehicles" onPress={next} disabled={!!problem} />
+        <Button label="See available vehicles" onPress={next} disabled={!ready} />
       </Footer>
 
-      <Modal visible={picking !== null} animationType="slide" onRequestClose={() => setPicking(null)}>
-        <Screen>
-          <Header
-            title={picking === 'from' ? 'Pick up from' : 'Going to'}
-            onBack={() => setPicking(null)}
-          />
-          {cities.loading ? (
-            <Loading />
-          ) : cities.error ? (
-            <ErrorState message={cities.error} onRetry={cities.reload} />
-          ) : (
-            <ScrollView contentContainerStyle={styles.cityList}>
-              {(cities.data ?? []).map((c) => (
-                <Card
-                  key={c.id}
-                  style={styles.cityRow}
-                  onPress={() => {
-                    draft.setRoute(
-                      picking === 'from'
-                        ? { from: c.name, to: draft.to }
-                        : { from: draft.from, to: c.name },
-                    );
-                    setPicking(null);
-                  }}
-                >
-                  <Row>
-                    <View>
-                      <Text style={styles.cityName}>{c.name}</Text>
-                      {c.state ? <Small>{c.state}</Small> : null}
-                    </View>
-                    <Icon name="forward" size={16} color={color.dim} />
-                  </Row>
-                </Card>
-              ))}
-            </ScrollView>
-          )}
-        </Screen>
-      </Modal>
+      <DestinationSheet
+        open={picking !== null}
+        onClose={() => setPicking(null)}
+        onPick={(name) => {
+          if (picking === 'from') draft.setRoute({ from: name, to: draft.to });
+          else if (picking === 'to') draft.setRoute({ from: draft.from, to: name });
+          else if (picking) {
+            // Adding lands one past the end; editing lands on an existing row.
+            if (picking.stop >= draft.stops.length) draft.addStop(name);
+            else draft.setStop(picking.stop, name);
+          }
+          setPicking(null);
+        }}
+        cities={cities.data ?? []}
+        popular={routes.data ?? []}
+        exclude={picking === 'from' ? draft.to : picking === 'to' ? draft.from : undefined}
+        mapTitle={
+          picking === 'from'
+            ? 'Pickup point'
+            : picking === 'to'
+              ? 'Destination'
+              : 'Stop on the way'
+        }
+        placeholder={
+          picking === 'from'
+            ? 'Where should we collect you?'
+            : picking === 'to'
+              ? 'Where do you want to go?'
+              : 'Where are you calling at?'
+        }
+      />
+
+      <DatePickerSheet
+        open={pickingDate}
+        value={pickup}
+        onClose={() => setPickingDate(false)}
+        onConfirm={(d) => {
+          draft.setDates({ pickup: d });
+          setPickingDate(false);
+        }}
+      />
     </Screen>
   );
 }
 
-function DateRow({
-  icon,
-  label,
-  value,
-  tint = color.blue,
-  onEarlier,
-  onLater,
+// One row of the itinerary, with its own piece of the rail. Drawn per row so
+// the dots stay on their values however many stops there are.
+function RailRow({
+  children,
+  tint,
+  first,
+  last,
 }: {
-  icon: IconName;
-  label: string;
-  value: string;
-  tint?: string;
-  onEarlier: () => void;
-  onLater: () => void;
+  children: React.ReactNode;
+  tint: string;
+  first?: boolean;
+  last?: boolean;
 }) {
   return (
-    <Card style={styles.dateCard}>
-      <Row>
-        <View style={[styles.plate, { backgroundColor: tint === color.ok ? color.okWash : color.blueWash }]}>
-          <Icon name={icon} size={18} color={tint} />
-        </View>
-        <View style={styles.legText}>
-          <Label>{label}</Label>
-          <Text style={styles.legValue}>{value}</Text>
-        </View>
-        <View style={styles.stepper}>
-          <Pressable onPress={onEarlier} hitSlop={8} style={styles.step} accessibilityLabel={`${label} earlier`}>
-            <Icon name="minus" size={16} color={color.sub} />
-          </Pressable>
-          <Pressable onPress={onLater} hitSlop={8} style={styles.step} accessibilityLabel={`${label} later`}>
-            <Icon name="plus" size={16} color={color.sub} />
-          </Pressable>
-        </View>
-      </Row>
-    </Card>
+    <View style={styles.row}>
+      <View style={styles.rail}>
+        <View style={[styles.railLine, first && styles.railHidden]} />
+        {last ? (
+          <Icon name="pin" size={15} color={tint} />
+        ) : (
+          <View style={[styles.railDot, { borderColor: tint }]} />
+        )}
+        <View style={[styles.railLine, last && styles.railHidden]} />
+      </View>
+      <View style={styles.rowBody}>{children}</View>
+    </View>
+  );
+}
+
+function Leg({
+  label,
+  value,
+  placeholder,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.leg, pressed && styles.pressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value || placeholder}`}
+    >
+      <Label>{label}</Label>
+      <Text style={[styles.value, !value && styles.placeholder]} numberOfLines={1}>
+        {value || placeholder}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -218,37 +260,70 @@ function defaultPickup(): Date {
 }
 
 const styles = StyleSheet.create({
-  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(13) },
-  legs: { padding: s(6) },
-  leg: { flexDirection: 'row', alignItems: 'center', gap: s(11), padding: s(10) },
-  legText: { flex: 1 },
-  legValue: { fontSize: f(14.5), fontWeight: weight.semi, color: color.ink },
-  placeholder: { color: color.dim, fontWeight: weight.medium },
-  legDivider: { height: 1, backgroundColor: color.line, marginLeft: s(38) },
+  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(12), paddingTop: s(4) },
 
-  dateCard: { padding: s(13) },
-  plate: {
+  legs: { padding: s(12) },
+  stack: {},
+  row: { flexDirection: 'row', alignItems: 'stretch', gap: s(12) },
+  rail: { width: s(16), alignItems: 'center' },
+  railDot: {
+    width: s(11),
+    height: s(11),
+    borderRadius: 999,
+    borderWidth: 3,
+    backgroundColor: color.card,
+  },
+  // Half a rail above and below each marker; the ends hide theirs, so the line
+  // runs between the rows and stops at the pickup and the pin.
+  railLine: { width: 2, flex: 1, minHeight: s(8), backgroundColor: color.line },
+  railHidden: { backgroundColor: 'transparent' },
+  rowBody: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: s(8) },
+  leg: { flex: 1, paddingVertical: s(11), gap: s(2) },
+  legDivider: { height: 1, backgroundColor: color.line },
+  pressed: { opacity: 0.55 },
+  drop: {
+    width: s(28),
+    height: s(28),
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addStop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: s(8),
+    paddingVertical: s(11),
+    paddingLeft: s(28),
+    marginTop: s(2),
+    borderTopWidth: 1,
+    borderTopColor: color.line,
+  },
+  addStopText: { fontSize: f(14), fontWeight: weight.bold, color: color.blue },
+  swap: {
     width: s(36),
     height: s(36),
-    borderRadius: radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepper: { flexDirection: 'row', gap: s(6) },
-  step: {
-    width: s(30),
-    height: s(30),
-    borderRadius: radius.sm,
+    borderRadius: 999,
     backgroundColor: color.bg,
+    borderWidth: 1,
+    borderColor: color.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapPressed: { backgroundColor: color.blueWash, borderColor: color.blueBorder },
+  swapOff: { opacity: 0.4 },
+
+  date: { flexDirection: 'row', alignItems: 'center', gap: s(12), padding: s(14) },
+  dateText: { flex: 1, gap: s(1) },
+  plate: {
+    width: s(38),
+    height: s(38),
+    borderRadius: radius.md,
+    backgroundColor: color.blueWash,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  note: { padding: s(13) },
-  noteText: { flex: 1, fontSize: f(12.5), color: color.blueDark, lineHeight: f(18) },
-  problem: { textAlign: 'center', marginBottom: s(10), color: color.warn },
+  value: { fontSize: f(15), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.2 },
+  placeholder: { color: color.dim, fontWeight: weight.semi },
 
-  cityList: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(9) },
-  cityRow: { padding: s(13) },
-  cityName: { fontSize: f(14.5), fontWeight: weight.semi, color: color.ink },
 });

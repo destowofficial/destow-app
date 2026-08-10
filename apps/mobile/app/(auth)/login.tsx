@@ -3,15 +3,14 @@ import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } fro
 import { router } from 'expo-router';
 import {
   Button,
-  Field,
   Footer,
   H1,
+  Label,
   P,
   Screen,
   Small,
 } from '../../components/ui/kit';
 import { Logo } from '../../components/ui/Logo';
-import { Icon } from '../../components/ui/Icon';
 import { color, radius, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { requestOtp } from '../../services/destow';
@@ -78,7 +77,9 @@ export default function Login() {
             </View>
 
             <View style={[styles.entry, digits.length > 0 && styles.entryFocused]}>
-              <Text style={styles.country}>🇮🇳 +91</Text>
+              <Label>Mobile</Label>
+              <View style={styles.entryRow}>
+              <Text style={styles.country}>+91</Text>
               <View style={styles.entryDivider} />
               <TextInput
                 value={digits}
@@ -96,18 +97,10 @@ export default function Login() {
                 autoFocus
                 accessibilityLabel="Mobile number"
               />
+              </View>
             </View>
 
-            {error ? (
-              <Text style={styles.error}>{error}</Text>
-            ) : (
-              <View style={styles.reassure}>
-                <Icon name="shield" size={14} color={color.dim} />
-                <Small style={styles.reassureText}>
-                  Your number is used to sign you in and to let the driver reach you. Nothing else.
-                </Small>
-              </View>
-            )}
+            {error ? <Text style={styles.error}>{error}</Text> : null}
           </View>
         </View>
 
@@ -127,17 +120,16 @@ const styles = StyleSheet.create({
   // Centred rather than top-aligned. There are three things on this screen and
   // stacking them under the notch leaves the bottom two thirds empty, which
   // reads as an unfinished screen rather than a calm one.
-  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(34) },
-  // The wordmark sits at the top; everything else centres in the space below
-  // it, so the screen reads as branded rather than as one floating block.
-  fill: { flex: 1, justifyContent: 'center', paddingBottom: s(48), gap: s(26) },
+  body: { flex: 1, paddingHorizontal: s(18), paddingTop: s(30) },
+  // One composed block rather than a logo pinned to the ceiling and the rest
+  // floating in the middle: centring the content in *all* the leftover space
+  // left a dead band about a third of the screen tall under the wordmark.
+  fill: { paddingTop: s(30), gap: s(20) },
   brand: { alignItems: 'center' },
   introText: { textAlign: 'center' },
   intro: { gap: s(7), alignItems: 'center' },
   entry: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(11),
+    gap: s(7),
     backgroundColor: color.card,
     borderRadius: radius.lg,
     paddingHorizontal: s(14),
@@ -146,6 +138,7 @@ const styles = StyleSheet.create({
     borderColor: color.line,
   },
   entryFocused: { borderWidth: 2, borderColor: color.blue },
+  entryRow: { flexDirection: 'row', alignItems: 'center', gap: s(11) },
   country: { fontSize: f(16), fontWeight: weight.semi, color: color.sub },
   entryDivider: { width: 1, height: f(22), backgroundColor: color.line },
   input: {
@@ -156,8 +149,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     padding: 0,
   },
-  reassure: { flexDirection: 'row', gap: s(9), alignItems: 'flex-start', paddingHorizontal: s(4) },
-  reassureText: { flex: 1 },
   error: { fontSize: f(13), color: color.red, lineHeight: f(19), textAlign: 'center' },
   legal: { textAlign: 'center', marginTop: s(12) },
 });

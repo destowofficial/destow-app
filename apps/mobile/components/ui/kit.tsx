@@ -113,8 +113,16 @@ export const H3 = (p: { children: React.ReactNode; style?: StyleProp<TextStyle> 
 export const P = (p: { children: React.ReactNode; style?: StyleProp<TextStyle> }) => (
   <Text style={[styles.p, p.style]}>{p.children}</Text>
 );
-export const Small = (p: { children: React.ReactNode; style?: StyleProp<TextStyle> }) => (
-  <Text style={[styles.small, p.style]}>{p.children}</Text>
+export const Small = (p: {
+  children: React.ReactNode;
+  style?: StyleProp<TextStyle>;
+  // A place returned by the maps provider can carry a long tail of district and
+  // state; one line of it is enough beside the name.
+  numberOfLines?: number;
+}) => (
+  <Text style={[styles.small, p.style]} numberOfLines={p.numberOfLines}>
+    {p.children}
+  </Text>
 );
 /** The uppercase micro-label above a value. */
 export const Label = (p: { children: React.ReactNode; style?: StyleProp<TextStyle> }) => (

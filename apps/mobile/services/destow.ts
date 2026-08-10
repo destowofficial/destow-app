@@ -7,6 +7,7 @@ import type {
   PopularRoute,
   RouteQuote,
   VehicleCategory,
+  PlaceSuggestion,
 } from '@destow/contracts';
 import { api } from './http';
 import { saveSession, clearSession, getRefreshToken } from './session';
@@ -115,6 +116,15 @@ export async function updateMe(input: { name?: string; email?: string }): Promis
 export async function listCities(): Promise<City[]> {
   const data = await api.get<{ cities: City[] }>('/cities');
   return data.cities;
+}
+
+// Place search runs against the maps provider, so anywhere in India is
+// reachable - not only the cities we happen to have seeded.
+export async function suggestPlaces(q: string): Promise<PlaceSuggestion[]> {
+  const data = await api.get<{ places: PlaceSuggestion[] }>(
+    `/places?q=${encodeURIComponent(q)}`,
+  );
+  return data.places;
 }
 
 export async function listPopularRoutes(): Promise<PopularRoute[]> {
