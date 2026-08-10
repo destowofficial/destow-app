@@ -28,5 +28,22 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Report all advisories (informational)
         run: bun audit || true
+      # image-size is unpatched, not out of date, and there is no version to
+      # move to: the advisories cover <=2.0.2 and 2.0.2 is the newest release,
+      # so every published version is inside the range. An override cannot help
+      # - it picks from what exists. Metro is the only thing that pulls it, and
+      # every metro from 0.84 to 0.87 requires ^1.0.2, so a bump does not clear
+      # it either. GitHub reports first_patched_version: null on both.
+      #
+      # The exposure is a hung parser on a malformed ICNS, JXL or HEIF file,
+      # reached at bundle time over assets committed to this repo - so getting
+      # there means a hostile image is already in our source tree.
+      #
+      # Excused by advisory ID, never by severity: every other high still fails
+      # the build, including any future advisory against image-size itself.
+      # Delete these two lines as soon as a patched release ships.
       - name: Fail on high/critical advisories
-        run: bun audit --audit-level=high
+        run: |
+          bun audit --audit-level=high \
+            --ignore=GHSA-w3rx-r6r6-pgpr \
+            --ignore=GHSA-5p2g-fcmc-qvqq
