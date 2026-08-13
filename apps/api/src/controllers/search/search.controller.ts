@@ -17,11 +17,11 @@ export async function searchController(req: Request, res: Response) {
 }
 
 export async function availableVehiclesController(req: Request, res: Response) {
-  const { from, to, category } = parseOrThrow(availableVehiclesBody, req.body);
+  const { from, to, category, stops } = parseOrThrow(availableVehiclesBody, req.body);
   // Pass the cap through. The service counts the true total separately so a
   // truncated list is visible rather than silently passed off as everything -
   // reporting vehicles.length as the count undid exactly that.
-  ok(res, await listAvailableVehicles(from, to, category));
+  ok(res, await listAvailableVehicles(from, to, category, stops));
 }
 
 export async function vehicleTypesController(_req: Request, res: Response) {

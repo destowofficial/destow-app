@@ -15,6 +15,10 @@ export const searchBody = z.object({
 export const availableVehiclesBody = z.object({
   from: place,
   to: place,
+  // The listing has to price the same journey the booking will. Quoting the
+  // direct route while the booking routes via a stop shows one number and
+  // charges another.
+  stops: z.array(place).max(3).default([]),
   // Narrow the listing to cars or buses. Omitted means both.
   category: z.enum(VEHICLE_CATEGORY).optional(),
 });

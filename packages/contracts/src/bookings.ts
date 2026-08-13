@@ -14,6 +14,21 @@ export const createBookingBody = z
     vehicleId: z.string().uuid(),
     from: z.string().trim().min(2).max(160),
     to: z.string().trim().min(2).max(160),
+    // Called at on the way out, in order. Capped: beyond a handful this stops
+    // being an outstation hire and becomes a tour, and every stop is another
+    // billed routing leg.
+    stops: z.array(z.string().trim().min(2).max(160)).max(3).default([]),
+    // The address the car actually comes to, and where the map put it. Optional
+    // because a customer may only ever name a city, but when the app has an
+    // address it must survive - a driver cannot drive to "Gurugram".
+    pickupAddress: z.string().trim().min(3).max(400).optional(),
+    pickupLat: z.number().gte(-90).lte(90).optional(),
+    pickupLng: z.number().gte(-180).lte(180).optional(),
+    // Where the round trip ends. Absent means "back where you were collected",
+    // which is what almost everyone wants.
+    dropAddress: z.string().trim().min(3).max(400).optional(),
+    dropLat: z.number().gte(-90).lte(90).optional(),
+    dropLng: z.number().gte(-180).lte(180).optional(),
     pickupDatetime: z.coerce.date(),
     tripType: z.literal('round_trip').default('round_trip'),
     returnDatetime: z.coerce.date(),
@@ -28,6 +43,22 @@ export const createBookingBody = z
   .refine((b) => b.returnDatetime.getTime() > b.pickupDatetime.getTime(), {
     path: ['returnDatetime'],
     message: 'Return must be after pickup',
+  })
+  // Half a coordinate pair is not a location. Accepting one would put a point
+  // on the equator or the prime meridian into a driver's navigation.
+  .refine((b) => (b.pickupLat === undefined) === (b.pickupLng === undefined), {
+    path: ['pickupLng'],
+    message: 'Pickup latitude and longitude must be given together',
+  })
+  .refine((b) => (b.dropLat === undefined) === (b.dropLng === undefined), {
+    path: ['dropLng'],
+    message: 'Drop latitude and longitude must be given together',
+  })
+  // A stop that repeats an end is a routing leg of zero length and a confusing
+  // itinerary; a stop repeated twice is the same.
+  .refine((b) => new Set([b.from, ...b.stops, b.to]).size === b.stops.length + 2, {
+    path: ['stops'],
+    message: 'Each stop must be somewhere different',
   });
 
 // What a partner submits when the vehicle comes back, and the only input that
@@ -62,6 +93,19 @@ export interface CustomerBooking {
   paymentStatus: (typeof PAYMENT_STATUS)[number];
   from: string;
   to: string;
+  /** Called at on the way out, in order. Empty for a direct trip. */
+  stops: string[];
+  /**
+   * Where the vehicle is actually sent, when the customer gave one. `from` is
+   * the place they picked; this is the address a driver can drive to.
+   */
+  pickupAddress: string | null;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  /** Where the round trip ends. Equal to the pickup unless they changed it. */
+  dropAddress: string | null;
+  dropLat: number | null;
+  dropLng: number | null;
   // The routed distance for the round trip, resolved at booking. This is the
   // estimate the quote was built from, not what the customer is billed for.
   distanceM: number;

@@ -17,7 +17,7 @@ import {
   cities,
   bookings,
 } from '../../db/schema.js';
-import { resolveDistance } from '../../lib/adapters/route.js';
+import { resolveDistance, resolveJourney } from '../../lib/adapters/route.js';
 import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
 import { redis, observeRedis } from '../../db/redis.js';
@@ -26,8 +26,14 @@ import { safeError } from '../../lib/log/safe.js';
 // The customer-facing quote. Distance comes from the maps adapter (cached), and
 // the fare from the pricing engine - the client supplies neither.
 
-export async function searchRoute(from: string, to: string): Promise<RouteQuote> {
-  const { distanceM, durationS } = await resolveDistance(from, to);
+export async function searchRoute(
+  from: string,
+  to: string,
+  stops: string[] = [],
+): Promise<RouteQuote> {
+  const { distanceM, durationS } = stops.length
+    ? await resolveJourney(from, stops, to)
+    : await resolveDistance(from, to);
   return { from, to, distanceM, durationS };
 }
 
@@ -49,13 +55,14 @@ export async function listAvailableVehicles(
   from: string,
   to: string,
   category?: VehicleCategory,
+  stops: string[] = [],
 ): Promise<{
   route: RouteQuote;
   vehicles: AvailableVehicle[];
   totalAvailable: number;
   truncated: boolean;
 }> {
-  const route = await searchRoute(from, to);
+  const route = await searchRoute(from, to, stops);
   const defaultBps = await platformCommissionBps();
 
   // Three gates, all required for a vehicle to be sellable: the partner is
