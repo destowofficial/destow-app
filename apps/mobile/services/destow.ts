@@ -140,6 +140,9 @@ export async function quoteRoute(from: string, to: string): Promise<RouteQuote> 
 export async function listAvailableVehicles(input: {
   from: string;
   to: string;
+  // Quoted against the same journey the booking will take, or the screen shows
+  // one price and the booking charges another.
+  stops?: string[];
   category?: VehicleCategory;
 }): Promise<{
   route: RouteQuote;
@@ -156,6 +159,11 @@ export async function createBooking(input: {
   vehicleId: string;
   from: string;
   to: string;
+  stops?: string[];
+  // The address the car is actually sent to, when the customer gave one.
+  pickupAddress?: string;
+  pickupLat?: number;
+  pickupLng?: number;
   pickupDatetime: Date;
   returnDatetime: Date;
 }): Promise<CustomerBooking> {

@@ -19,7 +19,7 @@ import { assertTransition, canTransition } from '../../lib/bookings/lifecycle.js
 import { computeRefund } from '../../lib/pricing/refund.js';
 import { payments } from '../../lib/adapters/payments.js';
 import { safeError } from '../../lib/log/safe.js';
-import { resolveDistance } from '../../lib/adapters/route.js';
+import { resolveDistance, resolveJourney } from '../../lib/adapters/route.js';
 import { computeFare, roundTripDistanceM } from '../../lib/pricing/pricing.js';
 import { formatPaise, clampCommissionBps } from '../../lib/pricing/money.js';
 
@@ -54,6 +54,13 @@ function toCustomerBooking(r: Row): CustomerBooking {
     paymentStatus: r.booking.paymentStatus,
     from: r.booking.fromLocation,
     to: r.booking.toLocation,
+    stops: r.booking.stops ?? [],
+    pickupAddress: r.booking.pickupAddress,
+    pickupLat: r.booking.pickupLat,
+    pickupLng: r.booking.pickupLng,
+    dropAddress: r.booking.dropAddress,
+    dropLat: r.booking.dropLat,
+    dropLng: r.booking.dropLng,
     distanceM: r.booking.distanceM,
     tripType: r.booking.tripType,
     pickupDatetime: r.booking.pickupDatetime.toISOString(),
@@ -167,7 +174,10 @@ export async function createBooking(
   // booking nobody accepted cannot block a customer who wants the same car.
   await releaseExpiredHolds(found.vehicle.id);
 
-  const distance = await resolveDistance(body.from, body.to);
+  // The whole outbound journey, not the straight line between its ends: a stop
+  // adds real kilometres, and pricing the endpoints would undercharge every
+  // trip that has one.
+  const distance = await resolveJourney(body.from, body.stops, body.to);
 
   // How long this trip takes the vehicle off the market: until the customer
   // brings it back. The max() guards a return date entered earlier than the
@@ -205,6 +215,16 @@ export async function createBooking(
       vehicleTypeId: found.type.id,
       fromLocation: body.from,
       toLocation: body.to,
+      stops: body.stops,
+      pickupAddress: body.pickupAddress ?? null,
+      pickupLat: body.pickupLat ?? null,
+      pickupLng: body.pickupLng ?? null,
+      // Absent means "back where you were collected", so the pickup is copied
+      // in rather than left null - the driver reads one field at the end of the
+      // trip and it should always say where to go.
+      dropAddress: body.dropAddress ?? body.pickupAddress ?? null,
+      dropLat: body.dropLat ?? body.pickupLat ?? null,
+      dropLng: body.dropLng ?? body.pickupLng ?? null,
       distanceM: fare.distanceM,
       tripType: body.tripType,
       pickupDatetime: body.pickupDatetime,

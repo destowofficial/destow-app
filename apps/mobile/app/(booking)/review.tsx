@@ -31,7 +31,7 @@ export default function Review() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { vehicle, route, from, to, stops, pickup } = draft;
+  const { vehicle, route, from, to, stops, pickupPoint, pickup } = draft;
 
   // The customer never gives a return date, so the vehicle's hold window is
   // estimated from the route's own driving time. It is a hold, not a promise:
@@ -67,6 +67,14 @@ export default function Review() {
         vehicleId: vehicle!.vehicleId,
         from,
         to,
+        // Sent, not just shown: the server prices the whole journey, so a stop
+        // left out here would quote a shorter trip than the one asked for.
+        stops,
+        // The pin, when there was one. Without it a driver is sent to a city
+        // rather than to a doorway.
+        pickupAddress: pickupPoint?.address,
+        pickupLat: pickupPoint?.lat,
+        pickupLng: pickupPoint?.lng,
         pickupDatetime: pickup!,
         returnDatetime: returnAt!,
       });
@@ -106,6 +114,11 @@ export default function Review() {
               <View>
                 <Label>Pickup</Label>
                 <Text style={styles.place}>{from}</Text>
+                {/* The exact point, when a pin was dropped. This is what the
+                    driver is actually sent to. */}
+                {pickupPoint ? (
+                  <Small numberOfLines={2}>{pickupPoint.address}</Small>
+                ) : null}
               </View>
               {stops.map((stop, i) => (
                 <View key={`${stop}-${i}`}>
