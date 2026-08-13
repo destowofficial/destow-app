@@ -6,7 +6,7 @@ import {
   Divider,
   ErrorState,
   H3,
-  Header,
+  PageHead,
   Label,
   Loading,
   Row,
@@ -33,7 +33,7 @@ export default function Pay() {
   if (trip.error || !trip.data) {
     return (
       <Screen>
-        <Header onBack={() => router.back()} />
+        <PageHead title="Pay" onBack={() => router.back()} />
         <ErrorState message={trip.error ?? 'Trip not found'} onRetry={trip.reload} />
       </Screen>
     );
@@ -43,14 +43,17 @@ export default function Pay() {
   const over = b.totalFarePaise - b.estimatedFarePaise;
 
   return (
-    <Screen>
-      <Header title="Pay for your trip" onBack={() => router.back()} />
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Pay for your trip"
+        subtitle={`${b.from} → ${b.to}`}
+        onBack={() => router.back()}
+      />
 
+      <View style={styles.sheet}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card lift>
-          <Label>
-            {b.from} ⇄ {b.to} · {tripDates(b.pickupDatetime, b.returnDatetime)}
-          </Label>
+          <Label>{tripDates(b.pickupDatetime, b.returnDatetime)}</Label>
 
           {b.odometerStartKm != null ? (
             <Row style={styles.line}>
@@ -122,12 +125,14 @@ export default function Pay() {
           Paying is how you agree the distance. Nothing is charged until you do.
         </Small>
       </ScrollView>
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { paddingHorizontal: s(18), paddingBottom: s(28), gap: s(11) },
+  sheet: { flex: 1, backgroundColor: color.bg },
+  body: { paddingHorizontal: s(18), paddingTop: s(14), paddingBottom: s(28), gap: s(11) },
   line: { marginTop: s(9) },
   value: { fontSize: f(13), fontWeight: weight.semi, color: color.ink, fontVariant: ['tabular-nums'] },
   total: {

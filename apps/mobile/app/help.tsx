@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Card, Header, Label, Row, Screen, Small } from '../components/ui/kit';
+import { Card, Label, PageHead, Row, Screen, Small } from '../components/ui/kit';
 import { Icon } from '../components/ui/Icon';
 import { color, radius, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
@@ -36,7 +36,7 @@ const QUESTIONS = [
 export default function Help() {
   return (
     <Screen>
-      <Header title="Help" onBack={() => router.back()} />
+      <PageHead title="Help and support" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Label>Common questions</Label>
         {QUESTIONS.map((item) => (

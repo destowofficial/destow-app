@@ -61,7 +61,7 @@ export default function Confirmed() {
           <Row style={styles.line}>
             <Small>Trip</Small>
             <Text style={styles.value}>
-              {b.from} ⇄ {b.to}
+              {b.from} → {b.to}
             </Text>
           </Row>
           <Row style={styles.line}>

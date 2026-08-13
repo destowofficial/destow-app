@@ -1,7 +1,7 @@
 import React from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Card, Header, P, Screen, Small } from '../components/ui/kit';
+import { Card, PageHead, Screen, Small } from '../components/ui/kit';
 import credits from '../assets/cities/credits.json';
 import { color, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
@@ -22,13 +22,12 @@ export default function PhotoCredits() {
 
   return (
     <Screen>
-      <Header title="Photo credits" onBack={() => router.back()} />
+      <PageHead
+        title="Photo credits"
+        subtitle="City photographs from Wikimedia Commons, under Creative Commons."
+        onBack={() => router.back()}
+      />
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-        <P style={styles.intro}>
-          City photographs come from Wikimedia Commons under Creative Commons licences. Thank you to
-          the photographers.
-        </P>
-
         {rows.map(([city, c]) => (
           <Card key={city} style={styles.row} onPress={() => Linking.openURL(c.page)}>
             <Text style={styles.city}>{city}</Text>

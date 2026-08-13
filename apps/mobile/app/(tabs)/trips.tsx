@@ -9,9 +9,10 @@ import {
   Chips,
   Empty,
   ErrorState,
-  H1,
   Loading,
   Row,
+  PageHead,
+  RouteLine,
   Screen,
   Small,
 } from '../../components/ui/kit';
@@ -20,7 +21,7 @@ import { color, weight } from '../../theme/tokens';
 import { f, s } from '../../theme/responsive';
 import { listMyBookings } from '../../services/destow';
 import { useAsync } from '../../hooks/useAsync';
-import { rupees, km, tripDates } from '../../lib/format';
+import { rupees, km, dayDate } from '../../lib/format';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -48,13 +49,18 @@ export default function Trips() {
   );
 
   return (
-    <Screen>
-      <View style={styles.head}>
-        <H1>Your trips</H1>
-      </View>
-      <View style={styles.filters}>
-        <Chips options={FILTERS} value={filter} onChange={setFilter} />
-      </View>
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Your trips"
+        subtitle={
+          items.length ? `${items.length} ${items.length === 1 ? 'trip' : 'trips'}` : undefined
+        }
+      />
+
+      <View style={styles.sheet}>
+        <View style={styles.filters}>
+          <Chips options={FILTERS} value={filter} onChange={setFilter} />
+        </View>
 
       {page.loading && !page.data ? (
         <ListSkeleton rows={4} tall />
@@ -78,6 +84,7 @@ export default function Trips() {
           ))}
         </ScrollView>
       )}
+      </View>
     </Screen>
   );
 }
@@ -89,15 +96,15 @@ function TripRow({ booking: b }: { booking: CustomerBooking }) {
   return (
     <Card onPress={open} style={owed ? styles.owed : undefined}>
       <Row style={styles.rowHead}>
-        <Text style={styles.route}>
-          {b.from} ⇄ {b.to}
-        </Text>
+        <View style={styles.routeWrap}>
+          <RouteLine from={b.from} to={b.to} />
+        </View>
         <Status booking={b} />
       </Row>
 
       <Row>
-        <Small>
-          {tripDates(b.pickupDatetime, b.returnDatetime)} · {b.vehicleTypeName}
+        <Small numberOfLines={1}>
+          {dayDate(b.pickupDatetime)} · {b.vehicleTypeName}
           {b.actualDistanceM ? ` · ${km(b.actualDistanceM)} run` : ''}
         </Small>
         {b.status === 'cancelled' ? (
@@ -140,12 +147,12 @@ function Status({ booking: b }: { booking: CustomerBooking }) {
 }
 
 const styles = StyleSheet.create({
-  head: { paddingHorizontal: s(18), paddingTop: s(6) },
-  filters: { paddingHorizontal: s(18), paddingVertical: s(14) },
-  list: { paddingHorizontal: s(18), paddingBottom: s(28), gap: s(11) },
+  sheet: { flex: 1, backgroundColor: color.bg },
+  filters: { paddingHorizontal: s(18), paddingTop: s(14), paddingBottom: s(4) },
+  list: { paddingHorizontal: s(18), paddingTop: s(10), paddingBottom: s(28), gap: s(11) },
+  routeWrap: { flex: 1 },
   owed: { borderWidth: 1.5, borderColor: color.warnBorder },
   rowHead: { marginBottom: s(8), alignItems: 'flex-start' },
-  route: { flex: 1, fontSize: f(15), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.2 },
   amount: {
     fontSize: f(15),
     fontWeight: weight.bold,

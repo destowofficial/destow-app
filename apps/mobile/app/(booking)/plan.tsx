@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Button, Card, Footer, Header, Label, Screen, Small } from '../../components/ui/kit';
+import { Button, Card, Footer, Label, PageHead, Screen, Small } from '../../components/ui/kit';
 import { DestinationSheet } from '../../components/DestinationSheet';
 import { DatePickerSheet } from '../../components/DatePickerSheet';
 import { Icon } from '../../components/ui/Icon';
@@ -58,9 +58,14 @@ export default function Plan() {
   }
 
   return (
-    <Screen>
-      <Header title="Plan your trip" onBack={() => router.back()} />
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Plan your trip"
+        subtitle={draft.to ? `To ${draft.to}` : 'Where from, where to, and when you leave'}
+        onBack={() => router.back()}
+      />
 
+      <View style={styles.sheet}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card lift style={styles.legs}>
           {/* A rail rather than a divider: the dots, the line and the pin say
@@ -147,6 +152,7 @@ export default function Plan() {
           <Icon name="forward" size={17} color={color.dim} />
         </Card>
       </ScrollView>
+      </View>
 
       <Footer>
         <Button label="See available vehicles" onPress={next} disabled={!ready} />
@@ -260,7 +266,8 @@ function defaultPickup(): Date {
 }
 
 const styles = StyleSheet.create({
-  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(12), paddingTop: s(4) },
+  sheet: { flex: 1, backgroundColor: color.bg },
+  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(12), paddingTop: s(16) },
 
   legs: { padding: s(12) },
   stack: {},

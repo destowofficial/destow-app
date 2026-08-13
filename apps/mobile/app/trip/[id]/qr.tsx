@@ -7,7 +7,7 @@ import {
   Card,
   ErrorState,
   Footer,
-  Header,
+  PageHead,
   Loading,
   Row,
   Screen,
@@ -99,19 +99,19 @@ export default function Qr() {
   if (error) {
     return (
       <Screen>
-        <Header title="Scan to pay" onBack={() => router.back()} />
+        <PageHead title="Scan to pay" onBack={() => router.back()} />
         <ErrorState message={error} onRetry={() => router.replace({ pathname: '/trip/[id]/qr', params: { id } })} />
       </Screen>
     );
   }
-  if (!qr) return <Screen><Header onBack={() => router.back()} /><Loading label="Raising a QR…" /></Screen>;
+  if (!qr) return <Screen><PageHead title="Pay by UPI" onBack={() => router.back()} /><Loading label="Raising a QR…" /></Screen>;
 
   const size = Math.min(screenWidth - s(120), s(230));
   const expired = left !== null && left <= 0;
 
   return (
     <Screen>
-      <Header title="Scan to pay" onBack={() => router.back()} />
+      <PageHead title="Scan to pay" onBack={() => router.back()} />
 
       <View style={styles.body}>
         <Text style={styles.amount}>{qr.amountDisplay}</Text>

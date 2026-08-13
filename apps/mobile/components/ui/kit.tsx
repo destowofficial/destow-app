@@ -11,6 +11,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from './Icon';
 import { color, radius, shadow, weight } from '../../theme/tokens';
 import { f, s, isTablet, layoutWidth } from '../../theme/responsive';
 
@@ -91,6 +92,73 @@ export function Header({
       {title ? <Text style={[styles.headerTitle, { color: tint }]}>{title}</Text> : <View />}
       <View style={styles.headerRight}>{right ?? <View style={{ width: s(20) }} />}</View>
     </View>
+  );
+}
+
+// The blue band a screen opens with: back, what this screen is, and the one
+// line of context that stops the title being ambiguous.
+//
+// Shared because every screen was inventing its own - a plain Header with a
+// subtitle hung underneath on a negative margin, sized differently each time.
+// One anatomy means the flow reads as one app rather than twelve.
+export function PageHead({
+  title,
+  subtitle,
+  onBack,
+  right,
+}: {
+  title: string;
+  subtitle?: React.ReactNode;
+  onBack?: () => void;
+  right?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.pageHead}>
+      <View style={styles.pageHeadRow}>
+        {onBack ? (
+          <Pressable
+            onPress={onBack}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            style={styles.pageHeadBack}
+          >
+            <Icon name="back" size={21} color={color.white} />
+          </Pressable>
+        ) : null}
+        <Text style={styles.pageHeadTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {right ?? null}
+      </View>
+      {subtitle ? <Text style={styles.pageHeadSub}>{subtitle}</Text> : null}
+    </View>
+  );
+}
+
+// Pickup and destination, said the same way everywhere.
+//
+// Half the screens wrote `{from} ⇄ {to}` by hand and the other half used an
+// arrow, so the same trip read differently depending on where you saw it.
+export function RouteLine({
+  from,
+  to,
+  note,
+  onTint,
+}: {
+  from: string;
+  to: string;
+  note?: string;
+  onTint?: boolean;
+}) {
+  return (
+    <Text
+      style={[styles.routeLine, onTint && styles.routeLineTint]}
+      numberOfLines={1}
+    >
+      {from} → {to}
+      {note ? <Text style={styles.routeNote}>{`  ·  ${note}`}</Text> : null}
+    </Text>
   );
 }
 
@@ -395,6 +463,9 @@ type Kit = {
   scrollBody: ViewStyle;
   header: ViewStyle;
   headerRight: ViewStyle;
+  pageHead: ViewStyle;
+  pageHeadRow: ViewStyle;
+  pageHeadBack: ViewStyle;
   hero: ViewStyle;
   card: ViewStyle;
   cardSelected: ViewStyle;
@@ -417,6 +488,11 @@ type Kit = {
   centre: ViewStyle;
   headerTitle: TextStyle;
   chevBack: TextStyle;
+  pageHeadTitle: TextStyle;
+  pageHeadSub: TextStyle;
+  routeLine: TextStyle;
+  routeLineTint: TextStyle;
+  routeNote: TextStyle;
   h1: TextStyle;
   h2: TextStyle;
   h3: TextStyle;
@@ -438,6 +514,31 @@ const styles = StyleSheet.create<Kit>({
   column: { flex: 1, width: '100%', alignSelf: 'center' },
   columnTablet: { maxWidth: layoutWidth },
   scrollBody: { flexGrow: 1 },
+
+  pageHead: {
+    backgroundColor: color.blue,
+    paddingHorizontal: s(18),
+    paddingTop: s(4),
+    paddingBottom: s(16),
+  },
+  pageHeadRow: { flexDirection: 'row', alignItems: 'center', gap: s(12) },
+  pageHeadBack: { marginLeft: -s(4) },
+  pageHeadTitle: {
+    flex: 1,
+    color: color.white,
+    fontSize: f(20),
+    fontWeight: weight.black,
+    letterSpacing: -0.5,
+  },
+  pageHeadSub: { color: 'rgba(255,255,255,0.82)', fontSize: f(13), marginTop: s(4) },
+  routeLine: {
+    fontSize: f(14.5),
+    fontWeight: weight.bold,
+    color: color.ink,
+    letterSpacing: -0.2,
+  },
+  routeLineTint: { color: color.white },
+  routeNote: { fontWeight: weight.semi, color: color.sub },
 
   header: {
     flexDirection: 'row',
