@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import {
-  Badge, Button, Card, Empty, ErrorState, Footer, Header, Loading, P, Row, Screen, Small,
+  Badge, Button, Card, Empty, ErrorState, Footer, PageHead, Row, Screen, Small,
 } from '../components/ui/kit';
+import { ConfirmSheet } from '../components/ConfirmSheet';
 import { Icon } from '../components/ui/Icon';
 import { ListSkeleton } from '../components/ui/Skeleton';
 import { color, radius, weight } from '../theme/tokens';
@@ -19,28 +20,22 @@ export default function Devices() {
   const sessions = useAsync(listSessions, []);
   const setUser = useAuthStore((st) => st.setUser);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
-  function confirmAll() {
-    Alert.alert('Sign out everywhere?', 'You will be signed out on this device too.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out everywhere',
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          await signOutEverywhere();
-          setUser(null);
-        },
-      },
-    ]);
+  async function signOutAll() {
+    setBusy(true);
+    await signOutEverywhere();
+    setUser(null);
   }
 
   return (
-    <Screen>
-      <Header title="Signed-in devices" onBack={() => router.back()} />
-      <View style={styles.intro}>
-        <P>Sign out of anything you don&apos;t recognise. Your trips are never lost by signing out.</P>
-      </View>
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Signed-in devices"
+        subtitle="Sign out of anything you don't recognise. Your trips are never lost."
+        onBack={() => router.back()}
+      />
+      <View style={styles.sheet}>
 
       {sessions.loading && !sessions.data ? (
         <ListSkeleton rows={3} />
@@ -69,15 +64,33 @@ export default function Devices() {
         </ScrollView>
       )}
 
+      </View>
+
       <Footer>
-        <Button label="Sign out everywhere" variant="ghost" loading={busy} onPress={confirmAll} />
+        <Button
+          label="Sign out everywhere"
+          variant="ghost"
+          loading={busy}
+          onPress={() => setConfirming(true)}
+        />
       </Footer>
+
+      <ConfirmSheet
+        open={confirming}
+        title="Sign out everywhere?"
+        body="Every signed-in device is signed out, including this one."
+        confirmLabel="Sign out everywhere"
+        destructive
+        busy={busy}
+        onCancel={() => setConfirming(false)}
+        onConfirm={signOutAll}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  intro: { paddingHorizontal: s(18), paddingBottom: s(16) },
+  sheet: { flex: 1, backgroundColor: color.bg, paddingTop: s(14) },
   list: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(10) },
   row: { padding: s(13) },
   text: { flex: 1 },

@@ -10,8 +10,7 @@ import {
   ErrorState,
   Footer,
   H3,
-  Header,
-  Hero,
+  PageHead,
   Label,
   Loading,
   Row,
@@ -23,7 +22,7 @@ import { color, weight } from '../../../theme/tokens';
 import { f, s } from '../../../theme/responsive';
 import { getBooking } from '../../../services/destow';
 import { useAsync } from '../../../hooks/useAsync';
-import { dayDate, time, km, tripDates } from '../../../lib/format';
+import { dayDate, time, km } from '../../../lib/format';
 
 // The screen a customer opens over and over between booking and pickup. It is
 // the whole answer to "is this actually happening?".
@@ -35,7 +34,7 @@ export default function TripDetail() {
   if (trip.error || !trip.data) {
     return (
       <Screen>
-        <Header onBack={() => router.back()} />
+        <PageHead title="Trip" onBack={() => router.back()} />
         <ErrorState message={trip.error ?? 'Trip not found'} onRetry={trip.reload} />
       </Screen>
     );
@@ -49,23 +48,20 @@ export default function TripDetail() {
   const rateable = b.status === 'completed' && b.paymentStatus === 'paid';
 
   return (
-    <Screen>
-      <Hero>
-        <Header title={`${b.from} ⇄ ${b.to}`} onBack={() => router.back()} onTint />
-        <Row>
-          <View>
-            <Text style={styles.heroLabel}>{owed ? 'Amount due' : 'Departs'}</Text>
-            <Text style={styles.heroValue}>
-              {owed ? b.totalFareDisplay : dayDate(b.pickupDatetime)}
-            </Text>
-          </View>
-          <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>
-              {tripDates(b.pickupDatetime, b.returnDatetime)}
-            </Text>
-          </View>
-        </Row>
-      </Hero>
+    <Screen ground={color.blue}>
+      <View style={styles.head}>
+        <PageHead
+          title={`${b.from} → ${b.to}`}
+          onBack={() => router.back()}
+        />
+        <View style={styles.heroFigure}>
+          <Text style={styles.heroLabel}>{owed ? 'Amount due' : 'Departs'}</Text>
+          <Text style={styles.heroValue}>
+            {owed ? b.totalFareDisplay : dayDate(b.pickupDatetime)}
+          </Text>
+          {!owed ? <Text style={styles.heroWhen}>Pickup at {time(b.pickupDatetime)}</Text> : null}
+        </View>
+      </View>
 
       <ScrollView
         style={styles.scroll}
@@ -226,6 +222,9 @@ function initials(name?: string | null): string {
 }
 
 const styles = StyleSheet.create({
+  head: { backgroundColor: color.blue },
+  heroFigure: { paddingHorizontal: s(18), paddingBottom: s(20), gap: s(1) },
+  heroWhen: { color: 'rgba(255,255,255,0.8)', fontSize: f(12.5), marginTop: s(2) },
   heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: f(12) },
   heroValue: {
     color: color.white,
@@ -234,16 +233,9 @@ const styles = StyleSheet.create({
     letterSpacing: -0.7,
     fontVariant: ['tabular-nums'],
   },
-  heroBadge: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: s(10),
-    paddingVertical: s(4),
-    borderRadius: 999,
-  },
-  heroBadgeText: { color: color.white, fontSize: f(11), fontWeight: weight.bold },
 
-  scroll: { flex: 1, marginTop: -s(16) },
-  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(12) },
+  scroll: { flex: 1, backgroundColor: color.bg },
+  body: { paddingHorizontal: s(18), paddingTop: s(14), paddingBottom: s(24), gap: s(12) },
 
   avatar: {
     width: s(42),

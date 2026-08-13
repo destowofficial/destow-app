@@ -31,7 +31,7 @@ export default function Paid() {
         <View style={styles.headline}>
           <H1 style={styles.centre}>Paid {b.totalFareDisplay}</H1>
           <P style={styles.centre}>
-            {b.from} ⇄ {b.to}
+            {b.from} → {b.to}
             {b.actualDistanceM ? ` · ${km(b.actualDistanceM)}` : ''}{'\n'}
             with {b.providerName}
           </P>

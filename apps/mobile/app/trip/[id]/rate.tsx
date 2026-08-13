@@ -63,7 +63,7 @@ export default function Rate() {
             How was your trip{who ? `\nwith ${who}?` : '?'}
           </H1>
           <P style={styles.centre}>
-            {b.from} ⇄ {b.to} · {tripDates(b.pickupDatetime, b.returnDatetime)}
+            {b.from} → {b.to} · {tripDates(b.pickupDatetime, b.returnDatetime)}
           </P>
         </View>
 

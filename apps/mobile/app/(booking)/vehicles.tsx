@@ -7,8 +7,8 @@ import {
   Chips,
   Empty,
   ErrorState,
-  Header,
-  Loading,
+  Label,
+  PageHead,
   Row,
   Screen,
   Small,
@@ -29,9 +29,12 @@ const FILTERS = [
   { key: 'bus', label: 'Bus' },
 ];
 
-// The catalogue, priced. Every row carries the total for the whole round trip
-// rather than only the per-kilometre rate: the rate on its own is a number
-// nobody can act on, and it is the total that decides which car someone picks.
+// The catalogue, priced.
+//
+// Every row leads with the total for the whole round trip rather than the
+// per-kilometre rate: the rate on its own is a number nobody can act on, and
+// the total is what decides which car someone takes. The rate stays underneath
+// it, because it is how the total can be checked.
 export default function Vehicles() {
   const { from, to, setVehicle } = useBookingStore();
   const [filter, setFilter] = useState('all');
@@ -47,116 +50,145 @@ export default function Vehicles() {
   );
 
   const route = listing.data?.route;
+  const roundTrip = route ? km(route.distanceM * 2) : null;
 
   return (
-    <Screen>
-      <Header
-        title={listing.data ? `${listing.data.totalAvailable} vehicles` : 'Vehicles'}
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Choose a vehicle"
+        subtitle={`${from} → ${to}${roundTrip ? `  ·  ${roundTrip} return` : ''}`}
         onBack={() => router.back()}
       />
 
-      <View style={styles.sub}>
-        <Small>
-          {from} ⇄ {to}
-          {route ? ` · est. ${km(route.distanceM * 2)}` : ''}
-        </Small>
-      </View>
+      <View style={styles.sheet}>
+        <View style={styles.filters}>
+          <Chips options={FILTERS} value={filter} onChange={setFilter} />
+        </View>
 
-      <View style={styles.filters}>
-        <Chips options={FILTERS} value={filter} onChange={setFilter} />
-      </View>
-
-      {listing.loading ? (
-        <ListSkeleton rows={4} />
-      ) : listing.error ? (
-        <ErrorState message={listing.error} onRetry={listing.reload} />
-      ) : (listing.data?.vehicles.length ?? 0) === 0 ? (
-        <Empty
-          title="Nothing on this route yet"
-          body="No operator is serving these dates. Try a different date or a nearby city."
-        />
-      ) : (
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {listing.data!.vehicles.map((v) => (
-            <Card
-              key={v.vehicleId}
-              onPress={() => {
-                setVehicle(v, listing.data!.route);
-                router.push('/(booking)/review');
-              }}
-            >
-              <Row style={styles.head}>
-                <View style={styles.headText}>
-                  <Text style={styles.name}>{v.vehicleTypeName}</Text>
-                  {v.modelName ? <Small>{v.modelName}</Small> : null}
-                </View>
-                <View style={styles.seats}>
-                  <Icon name="user" size={12} color={color.blueDark} />
-                  <Text style={styles.seatsText}>{v.seats}</Text>
-                </View>
-              </Row>
-
-              <Row>
-                <View style={styles.meta}>
-                  <View style={styles.rating}>
-                    <Icon name="star" size={12} color={v.providerRatingAvg ? color.star : color.dim} />
-                    <Text style={styles.ratingText}>
-                      {v.providerRatingAvg ? v.providerRatingAvg.toFixed(1) : 'New'}
-                    </Text>
-                    <Small> · {v.providerName}</Small>
+        {listing.loading ? (
+          <ListSkeleton rows={4} />
+        ) : listing.error ? (
+          <ErrorState message={listing.error} onRetry={listing.reload} />
+        ) : (listing.data?.vehicles.length ?? 0) === 0 ? (
+          <Empty
+            title="Nothing on this route yet"
+            body="No operator is serving it. Try a nearby city, or a different date."
+          />
+        ) : (
+          <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+            {listing.data!.vehicles.map((v, i) => (
+              <Card
+                key={v.vehicleId}
+                lift={i === 0}
+                style={styles.card}
+                onPress={() => {
+                  setVehicle(v, listing.data!.route);
+                  router.push('/(booking)/review');
+                }}
+              >
+                <Row style={styles.top}>
+                  <View style={styles.name}>
+                    <Text style={styles.type}>{v.vehicleTypeName}</Text>
+                    {v.modelName ? <Small numberOfLines={1}>{v.modelName}</Small> : null}
                   </View>
-                  <Small>
-                    {rupees(v.pricePerKmPaise)}/km
-                    {route ? ` · est. ${km(route.distanceM * 2)}` : ''}
-                  </Small>
+                  {/* Cheapest first, so the first row is the one most people
+                      take - worth saying rather than leaving them to infer. */}
+                  {i === 0 ? (
+                    <View style={styles.tag}>
+                      <Text style={styles.tagText}>Cheapest</Text>
+                    </View>
+                  ) : null}
+                </Row>
+
+                <View style={styles.specs}>
+                  <Spec icon="user" label={`${v.seats} seats`} />
+                  <Spec icon="pin" label={`${v.bags} bags`} />
+                  <Spec
+                    icon="star"
+                    label={v.providerRatingAvg ? v.providerRatingAvg.toFixed(1) : 'New'}
+                    tint={v.providerRatingAvg ? color.star : color.dim}
+                  />
                 </View>
-                <Text style={styles.fare}>{v.totalFareDisplay}</Text>
-              </Row>
-            </Card>
-          ))}
 
-          {listing.data!.truncated ? (
-            <Small style={styles.truncated}>
-              Showing the {listing.data!.vehicles.length} cheapest of {listing.data!.totalAvailable}.
+                <View style={styles.rule} />
+
+                <Row>
+                  <View style={styles.priceText}>
+                    <Label>Round trip</Label>
+                    <Small>
+                      {rupees(v.pricePerKmPaise)}/km · {v.providerName}
+                    </Small>
+                  </View>
+                  <Text style={styles.fare}>{v.totalFareDisplay}</Text>
+                </Row>
+              </Card>
+            ))}
+
+            {listing.data!.truncated ? (
+              <Small style={styles.quiet}>
+                Showing the {listing.data!.vehicles.length} cheapest of{' '}
+                {listing.data!.totalAvailable}.
+              </Small>
+            ) : null}
+
+            <Small style={styles.quiet}>
+              An estimate. You pay for the kilometres actually driven.
             </Small>
-          ) : null}
-
-          <Small style={styles.footnote}>
-            Prices are an estimate for the round trip. You pay for the kilometres actually driven.
-          </Small>
-        </ScrollView>
-      )}
+          </ScrollView>
+        )}
+      </View>
     </Screen>
   );
 }
 
+function Spec({
+  icon,
+  label,
+  tint = color.sub,
+}: {
+  icon: 'user' | 'pin' | 'star';
+  label: string;
+  tint?: string;
+}) {
+  return (
+    <View style={styles.spec}>
+      <Icon name={icon} size={13} color={tint} />
+      <Text style={styles.specText}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  sub: { paddingHorizontal: s(18), marginTop: -s(8) },
-  filters: { paddingHorizontal: s(18), paddingVertical: s(13) },
-  list: { paddingHorizontal: s(18), paddingBottom: s(28), gap: s(11) },
-  head: { marginBottom: s(9), alignItems: 'flex-start' },
-  headText: { flex: 1 },
-  name: { fontSize: f(15), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.2 },
-  seats: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: s(4),
-    backgroundColor: color.blueWash,
+  sheet: { flex: 1, backgroundColor: color.bg },
+  filters: { paddingHorizontal: s(18), paddingTop: s(14), paddingBottom: s(4) },
+  list: { paddingHorizontal: s(18), paddingTop: s(10), paddingBottom: s(28), gap: s(11) },
+
+  card: { padding: s(14) },
+  top: { alignItems: 'flex-start', marginBottom: s(10) },
+  name: { flex: 1, gap: s(1) },
+  type: { fontSize: f(16), fontWeight: weight.bold, color: color.ink, letterSpacing: -0.3 },
+  tag: {
+    backgroundColor: color.okWash,
+    borderRadius: 999,
     paddingHorizontal: s(9),
     paddingVertical: s(3),
-    borderRadius: 999,
   },
-  seatsText: { fontSize: f(10.5), fontWeight: weight.bold, color: color.blueDark },
-  meta: { flex: 1, gap: s(2) },
-  rating: { flexDirection: 'row', alignItems: 'center', gap: s(4) },
-  ratingText: { fontSize: f(11.5), fontWeight: weight.bold, color: color.ink },
+  tagText: { fontSize: f(10.5), fontWeight: weight.black, color: color.ok, letterSpacing: 0.3 },
+
+  specs: { flexDirection: 'row', gap: s(14) },
+  spec: { flexDirection: 'row', alignItems: 'center', gap: s(5) },
+  specText: { fontSize: f(12.5), fontWeight: weight.semi, color: color.sub },
+
+  rule: { height: 1, backgroundColor: color.line, marginVertical: s(12) },
+
+  priceText: { flex: 1, gap: s(2) },
   fare: {
-    fontSize: f(19),
+    fontSize: f(21),
     fontWeight: weight.black,
     color: color.ink,
-    letterSpacing: -0.6,
+    letterSpacing: -0.7,
     fontVariant: ['tabular-nums'],
   },
-  truncated: { textAlign: 'center', marginTop: s(4) },
-  footnote: { textAlign: 'center', marginTop: s(8), paddingHorizontal: s(12) },
+
+  quiet: { textAlign: 'center', marginTop: s(4), paddingHorizontal: s(12) },
 });

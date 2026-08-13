@@ -6,7 +6,7 @@ import {
   Card,
   Divider,
   Footer,
-  Header,
+  PageHead,
   Label,
   Row,
   Screen,
@@ -31,7 +31,7 @@ export default function Review() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { vehicle, route, from, to, pickup } = draft;
+  const { vehicle, route, from, to, stops, pickup } = draft;
 
   // The customer never gives a return date, so the vehicle's hold window is
   // estimated from the route's own driving time. It is a hold, not a promise:
@@ -42,8 +42,8 @@ export default function Review() {
   // navigation state could land here without one.
   if (!vehicle || !route || !pickup || !returnAt) {
     return (
-      <Screen>
-        <Header title="Review" onBack={() => router.back()} />
+      <Screen ground={color.blue}>
+        <PageHead title="Review your trip" onBack={() => router.back()} />
         <View style={styles.gone}>
           <Small>That selection has expired. Start the search again.</Small>
           <Button
@@ -80,8 +80,13 @@ export default function Review() {
   }
 
   return (
-    <Screen>
-      <Header title="Review" onBack={() => router.back()} />
+    <Screen ground={color.blue}>
+      <PageHead
+        title="Review your trip"
+        subtitle={`Leaving ${dayDate(pickup)}, ${time(pickup)}`}
+        onBack={() => router.back()}
+      />
+      <View style={styles.sheet}>
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Card>
@@ -89,6 +94,12 @@ export default function Review() {
             <View style={styles.rail}>
               <Icon name="dot" size={14} color={color.ok} />
               <View style={styles.railLine} />
+              {stops.map((_, i) => (
+                <React.Fragment key={`rail-${i}`}>
+                  <Icon name="dot" size={12} color={color.blue} />
+                  <View style={styles.railLine} />
+                </React.Fragment>
+              ))}
               <Icon name="pin" size={14} color={color.red} />
             </View>
             <View style={styles.legText}>
@@ -96,8 +107,14 @@ export default function Review() {
                 <Label>Pickup</Label>
                 <Text style={styles.place}>{from}</Text>
               </View>
+              {stops.map((stop, i) => (
+                <View key={`${stop}-${i}`}>
+                  <Label>Stop {i + 1}</Label>
+                  <Text style={styles.place}>{stop}</Text>
+                </View>
+              ))}
               <View>
-                <Label>Drop</Label>
+                <Label>Destination</Label>
                 <Text style={styles.place}>{to}</Text>
               </View>
             </View>
@@ -141,7 +158,7 @@ export default function Review() {
           <Row style={styles.noteRow}>
             <Icon name="info" size={17} color={color.blueDark} />
             <Text style={styles.noteText}>
-              An estimate, not the bill. Your driver reads the odometer at the end and you pay for
+              An estimate, not the bill. The driver reads the odometer at the end and you pay for
               the kilometres actually run.
             </Text>
           </Row>
@@ -149,6 +166,7 @@ export default function Review() {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
+      </View>
 
       <Footer>
         <Button label="Confirm booking" onPress={book} loading={busy} />
@@ -162,7 +180,8 @@ export default function Review() {
 }
 
 const styles = StyleSheet.create({
-  body: { paddingHorizontal: s(18), paddingBottom: s(24), gap: s(12) },
+  sheet: { flex: 1, backgroundColor: color.bg },
+  body: { paddingHorizontal: s(18), paddingTop: s(14), paddingBottom: s(24), gap: s(12) },
   gone: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: s(24) },
 
   legs: { flexDirection: 'row', gap: s(12) },
