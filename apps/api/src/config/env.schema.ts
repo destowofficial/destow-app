@@ -70,6 +70,7 @@ export const envSchema = z.object({
   ALLOW_EPHEMERAL_JWT_KEYS: envBool(false), // boot without a real signing keypair
   ALLOW_INSECURE_COOKIES: envBool(false), // drop Secure on the refresh cookie
   ALLOW_WILDCARD_CORS: envBool(false), // permit CORS_ORIGINS='*'
+  ALLOW_STUB_PAYMENTS: envBool(false), // run the stub gateway without Razorpay keys
 
   // --- OTP delivery credentials -----------------------------------------------
   // env supplies only the secrets. WHICH channels are live, and which is default
@@ -129,6 +130,7 @@ const DEV_ONLY_FLAGS = [
   'ALLOW_EPHEMERAL_JWT_KEYS',
   'ALLOW_INSECURE_COOKIES',
   'ALLOW_WILDCARD_CORS',
+  'ALLOW_STUB_PAYMENTS',
 ] as const;
 
 export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
@@ -167,6 +169,21 @@ export function parseEnv(source: NodeJS.ProcessEnv = process.env): Env {
   if (data.RAZORPAY_KEY_ID && data.RAZORPAY_KEY_SECRET && !data.RAZORPAY_WEBHOOK_SECRET) {
     throw new Error(
       'RAZORPAY_WEBHOOK_SECRET is required whenever Razorpay keys are set - without it webhook signatures cannot be verified',
+    );
+  }
+
+  // The stub payment gateway verifies webhooks against a secret hardcoded in
+  // this repo, so with the stub live anyone can sign a 'captured' event and mark
+  // a booking paid without paying - Destow then settles the provider on money it
+  // never collected. Booting the stub therefore has to be a deliberate,
+  // development-only choice, and because ALLOW_STUB_PAYMENTS is a DEV_ONLY_FLAG
+  // production rejects it above even if someone sets it. A production host with
+  // no Razorpay keys refuses to start rather than quietly taking forged money.
+  if (!data.ALLOW_STUB_PAYMENTS && !(data.RAZORPAY_KEY_ID && data.RAZORPAY_KEY_SECRET)) {
+    throw new Error(
+      'Razorpay keys (RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET) are required, or set ' +
+        'ALLOW_STUB_PAYMENTS=true for local development. The stub gateway signs webhooks ' +
+        'with a secret committed to this repo and must never run in production.',
     );
   }
 

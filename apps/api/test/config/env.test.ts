@@ -14,6 +14,11 @@ const base = {
   JWT_SECRET: 'test_secret_at_least_32_characters_long',
   OTP_HMAC_SECRET: 'test_otp_hmac_at_least_32_characters_long',
   ALLOW_EPHEMERAL_JWT_KEYS: 'true',
+  // A valid environment now includes a real payment provider. Without one,
+  // parseEnv refuses to boot rather than fall back to the forgeable stub.
+  RAZORPAY_KEY_ID: 'rzp_test_id',
+  RAZORPAY_KEY_SECRET: 'rzp_test_secret',
+  RAZORPAY_WEBHOOK_SECRET: 'rzp_test_webhook_secret',
 } as NodeJS.ProcessEnv;
 
 const whatsappCreds = {

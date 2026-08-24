@@ -216,10 +216,14 @@ export async function handlePaymentWebhook(rawBody: string, signature: string) {
   // would settle the booking in full and the trip would run for less than it
   // was sold for. Left unpaid and logged rather than guessed at: a short
   // payment is a human decision, not something to round away.
-  if (event.amountPaise !== undefined && event.amountPaise !== booking.totalFarePaise) {
+  // Fail closed on a missing amount, not open. A captured event that carries no
+  // amount cannot be reconciled against the fare, and settling it anyway would
+  // let a part payment - or a forged event with the amount omitted - close a
+  // booking in full. An amount that is present must match exactly.
+  if (event.amountPaise !== booking.totalFarePaise) {
     console.error(
       `[payments] amount mismatch on booking ${booking.id}: ` +
-        `gateway ${event.amountPaise} vs fare ${booking.totalFarePaise} - not settling`,
+        `gateway ${event.amountPaise ?? 'missing'} vs fare ${booking.totalFarePaise} - not settling`,
     );
     recordPaymentEvent(payments.name, 'upi', 'amount_mismatch');
     return { handled: false, reason: 'amount does not match the booking fare' };

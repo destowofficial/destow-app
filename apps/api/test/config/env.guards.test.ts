@@ -8,6 +8,10 @@ const base: NodeJS.ProcessEnv = {
   JWT_SECRET: 'x'.repeat(32),
   OTP_HMAC_SECRET: 'y'.repeat(32),
   ALLOW_EPHEMERAL_JWT_KEYS: 'true',
+  // A payment provider is part of a valid environment now.
+  RAZORPAY_KEY_ID: 'rzp_test_id',
+  RAZORPAY_KEY_SECRET: 'rzp_test_secret',
+  RAZORPAY_WEBHOOK_SECRET: 'rzp_test_webhook_secret',
 };
 
 const withKeys: NodeJS.ProcessEnv = {
@@ -16,6 +20,9 @@ const withKeys: NodeJS.ProcessEnv = {
   OTP_HMAC_SECRET: 'y'.repeat(32),
   JWT_PRIVATE_KEY: 'pem',
   JWT_PUBLIC_KEY: 'pem',
+  RAZORPAY_KEY_ID: 'rzp_test_id',
+  RAZORPAY_KEY_SECRET: 'rzp_test_secret',
+  RAZORPAY_WEBHOOK_SECRET: 'rzp_test_webhook_secret',
 };
 
 describe('parseEnv dev-affordance flags', () => {
@@ -101,6 +108,9 @@ describe('OTP_HMAC_SECRET', () => {
     DATABASE_URL: 'postgres://u:p@localhost:5432/destow',
     JWT_SECRET: 'x'.repeat(32),
     ALLOW_EPHEMERAL_JWT_KEYS: 'true',
+    // A valid environment needs a payment provider; the stub opt-in keeps this
+    // fixture about the one variable each test overrides.
+    ALLOW_STUB_PAYMENTS: 'true',
   };
 
   it('is required', () => {
@@ -115,5 +125,51 @@ describe('OTP_HMAC_SECRET', () => {
     expect(parseEnv({ ...minimal, OTP_HMAC_SECRET: 'y'.repeat(32) }).OTP_HMAC_SECRET).toHaveLength(
       32,
     );
+  });
+});
+
+describe('parseEnv payment-provider guard', () => {
+  // The stub gateway verifies webhooks against a secret committed to this repo,
+  // so booting it live lets anyone forge a captured-payment event.
+  const noProvider = {
+    DATABASE_URL: 'postgres://u:p@localhost:5432/destow',
+    JWT_SECRET: 'x'.repeat(32),
+    OTP_HMAC_SECRET: 'y'.repeat(32),
+    ALLOW_EPHEMERAL_JWT_KEYS: 'true',
+  } as NodeJS.ProcessEnv;
+
+  it('refuses to boot with no Razorpay keys and no explicit stub opt-in', () => {
+    expect(() => parseEnv(noProvider)).toThrow(/RAZORPAY_KEY_ID|ALLOW_STUB_PAYMENTS/);
+  });
+
+  it('allows the stub only when ALLOW_STUB_PAYMENTS is set', () => {
+    expect(parseEnv({ ...noProvider, ALLOW_STUB_PAYMENTS: 'true' }).ALLOW_STUB_PAYMENTS).toBe(true);
+  });
+
+  it('refuses the stub opt-in in production, since it is a dev-only flag', () => {
+    expect(() =>
+      parseEnv({
+        ...noProvider,
+        NODE_ENV: 'production',
+        ALLOW_EPHEMERAL_JWT_KEYS: 'false',
+        JWT_PRIVATE_KEY: 'pem',
+        JWT_PUBLIC_KEY: 'pem',
+        ALLOW_STUB_PAYMENTS: 'true',
+      }),
+    ).toThrow(/production/);
+  });
+
+  it('boots in production with real Razorpay keys and no stub flag', () => {
+    const env = parseEnv({
+      ...noProvider,
+      NODE_ENV: 'production',
+      ALLOW_EPHEMERAL_JWT_KEYS: 'false',
+      JWT_PRIVATE_KEY: 'pem',
+      JWT_PUBLIC_KEY: 'pem',
+      RAZORPAY_KEY_ID: 'rzp_id',
+      RAZORPAY_KEY_SECRET: 'rzp_secret',
+      RAZORPAY_WEBHOOK_SECRET: 'rzp_webhook',
+    });
+    expect(env.ALLOW_STUB_PAYMENTS).toBe(false);
   });
 });
