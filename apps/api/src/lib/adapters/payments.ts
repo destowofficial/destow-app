@@ -254,7 +254,18 @@ export function stubWebhookBody(input: {
   });
 }
 
-export const payments: PaymentProvider =
-  env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET
-    ? new RazorpayProvider()
-    : new StubPaymentProvider();
+function selectProvider(): PaymentProvider {
+  if (env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET) return new RazorpayProvider();
+  // Reachable only with ALLOW_STUB_PAYMENTS=true, which parseEnv permits solely
+  // outside production. The check is repeated here so the stub cannot be the
+  // live gateway even if the env guard is ever loosened - the secret it verifies
+  // against is a constant in this file.
+  if (!env.ALLOW_STUB_PAYMENTS) {
+    throw new Error(
+      'No payment provider: set Razorpay keys, or ALLOW_STUB_PAYMENTS=true for local development.',
+    );
+  }
+  return new StubPaymentProvider();
+}
+
+export const payments: PaymentProvider = selectProvider();

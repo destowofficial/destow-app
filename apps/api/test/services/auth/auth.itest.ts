@@ -2241,6 +2241,27 @@ test('a QR credit for the wrong amount does not settle', async () => {
   expect((await rowFor(booking.id)).paymentStatus).toBe('pending');
 });
 
+// A captured event that carries no amount cannot be reconciled against the
+// fare. Settling it anyway let a forged webhook - or a real part-capture with
+// the amount omitted - close a booking in full, so a missing amount fails
+// closed exactly like a wrong one.
+test('a QR credit with no amount at all does not settle', async () => {
+  const { customer, booking } = await finishedTrip();
+  const qr = await startQrPayment(customer.id, booking.id);
+  void qr;
+  // A body in the credited shape but with the amount field absent.
+  const body = JSON.stringify({
+    event: 'qr_code.credited',
+    payload: {
+      qr_code: { entity: { id: qr.qrId } },
+      payment: { entity: { id: 'pay_qr_noamt', qr_code_id: qr.qrId, status: 'captured' } },
+    },
+  });
+  const result = await handlePaymentWebhook(body, stubWebhookSignature(body));
+  expect(result.handled).toBe(false);
+  expect((await rowFor(booking.id)).paymentStatus).toBe('pending');
+});
+
 // #34: reachable with no race - the QR is raised, the trip is called off, and
 // the customer scans anyway.
 test('a QR credit for a cancelled booking does not settle it', async () => {
