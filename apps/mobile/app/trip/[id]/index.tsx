@@ -98,6 +98,31 @@ export default function TripDetail() {
           </Card>
         ) : null}
 
+        {b.pickupAddress || b.stops.length > 0 ? (
+          <Card>
+            <Label>Itinerary</Label>
+            <View style={styles.plan}>
+              <View style={styles.planRow}>
+                <Icon name="dot" size={13} color={color.ok} />
+                <View style={styles.planText}>
+                  <Text style={styles.planPlace}>{b.from}</Text>
+                  {b.pickupAddress ? <Small numberOfLines={2}>{b.pickupAddress}</Small> : null}
+                </View>
+              </View>
+              {b.stops.map((stop, i) => (
+                <View key={`${stop}-${i}`} style={styles.planRow}>
+                  <Icon name="dot" size={13} color={color.blue} />
+                  <Text style={styles.planPlace}>{stop}</Text>
+                </View>
+              ))}
+              <View style={styles.planRow}>
+                <Icon name="pin" size={13} color={color.red} />
+                <Text style={styles.planPlace}>{b.to}</Text>
+              </View>
+            </View>
+          </Card>
+        ) : null}
+
         <Card>
           <Label>Trip status</Label>
           <View style={styles.timeline}>
@@ -256,6 +281,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  plan: { marginTop: s(10), gap: s(9) },
+  planRow: { flexDirection: 'row', alignItems: 'flex-start', gap: s(10) },
+  planText: { flex: 1, gap: s(1) },
+  planPlace: { flex: 1, fontSize: f(14), fontWeight: weight.semi, color: color.ink },
 
   timeline: { marginTop: s(12) },
   step: { flexDirection: 'row', gap: s(12) },

@@ -18,6 +18,12 @@ export interface Draft {
    */
   stops: string[];
   /**
+   * Where the car is actually sent, when the customer dropped a pin. `from` is
+   * the label they see; this is the address and the point a driver navigates
+   * to. Null when they only ever named a place.
+   */
+  pickupPoint: { address: string; lat: number; lng: number } | null;
+  /**
    * Departure only. Trips are round trips, but the customer never states a
    * return - it is estimated from the route when the booking is created, so
    * there is nothing here to hold.
@@ -29,6 +35,7 @@ export interface Draft {
 
 interface BookingState extends Draft {
   setRoute: (r: { from: string; to: string }) => void;
+  setPickupPoint: (p: Draft['pickupPoint']) => void;
   setStop: (index: number, place: string) => void;
   addStop: (place: string) => void;
   removeStop: (index: number) => void;
@@ -41,6 +48,7 @@ const empty: Draft = {
   from: '',
   to: '',
   stops: [],
+  pickupPoint: null,
   pickup: null,
   vehicle: null,
   route: null,
@@ -53,6 +61,8 @@ export const useBookingStore = create<BookingState>((set) => ({
     // Changing either end invalidates the vehicle: it was priced for the old
     // route, and showing that fare against a new one would be a lie.
     set({ from, to, vehicle: null, route: null }),
+
+  setPickupPoint: (pickupPoint) => set({ pickupPoint }),
 
   setDates: ({ pickup }) => set((st) => ({ pickup: pickup ?? st.pickup })),
 

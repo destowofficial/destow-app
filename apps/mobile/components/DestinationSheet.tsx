@@ -16,7 +16,7 @@ import { Label, Small } from './ui/kit';
 import { Icon } from './ui/Icon';
 import { cityPhoto } from '../assets/cities';
 import { suggestPlaces } from '../services/destow';
-import { MapPickerSheet } from './MapPickerSheet';
+import { MapPickerSheet, type PickedPoint } from './MapPickerSheet';
 import { color, radius, weight } from '../theme/tokens';
 import { f, s } from '../theme/responsive';
 import { km } from '../lib/format';
@@ -46,7 +46,7 @@ export function DestinationSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  onPick: (city: string) => void;
+  onPick: (place: string, point?: PickedPoint) => void;
   cities: City[];
   popular: PopularRoute[];
   exclude?: string;
@@ -95,10 +95,10 @@ export function DestinationSheet({
     return () => clearTimeout(t);
   }, [query, searchable, open]);
 
-  function pick(name: string) {
+  function pick(name: string, point?: PickedPoint) {
     setQ('');
     setResults([]);
-    onPick(name);
+    onPick(name, point);
   }
 
   function close() {
@@ -222,9 +222,9 @@ export function DestinationSheet({
         open={onMap}
         title={mapTitle ?? 'Choose the point'}
         onClose={() => setOnMap(false)}
-        onConfirm={(place) => {
+        onConfirm={(picked) => {
           setOnMap(false);
-          pick(place);
+          pick(picked.address, picked);
         }}
       />
     </Modal>

@@ -161,8 +161,13 @@ export default function Plan() {
       <DestinationSheet
         open={picking !== null}
         onClose={() => setPicking(null)}
-        onPick={(name) => {
-          if (picking === 'from') draft.setRoute({ from: name, to: draft.to });
+        onPick={(name, point) => {
+          if (picking === 'from') {
+            draft.setRoute({ from: name, to: draft.to });
+            // Only a dropped pin carries a point; naming a city clears it, or
+            // the car would be sent to the last address for a different place.
+            draft.setPickupPoint(point ?? null);
+          }
           else if (picking === 'to') draft.setRoute({ from: draft.from, to: name });
           else if (picking) {
             // Adding lands one past the end; editing lands on an existing row.

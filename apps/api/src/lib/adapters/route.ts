@@ -44,3 +44,37 @@ export async function resolveDistance(from: string, to: string): Promise<Distanc
 
   return result;
 }
+
+// The whole outbound journey, stop by stop.
+//
+// A hire that calls at Shimla on the way to Manali is one booking priced on the
+// distance it actually covers, so the legs are summed rather than the endpoints
+// measured: Delhi->Shimla plus Shimla->Manali is meaningfully longer than
+// Delhi->Manali, and quoting the direct line would undercharge every trip with
+// a stop on it.
+//
+// Each leg goes through resolveDistance, so legs are cached and shared with
+// plain point-to-point quotes - the Delhi->Shimla leg costs nothing once
+// somebody has already asked for Delhi to Shimla.
+//
+// Sequential on purpose. Firing the legs in parallel would be faster, but two
+// requests for the same uncached leg would both miss and both bill; a booking
+// with three stops is four calls at most, and correctness is worth the
+// milliseconds here.
+export async function resolveJourney(
+  from: string,
+  stops: string[],
+  to: string,
+): Promise<DistanceResult> {
+  const points = [from, ...stops, to];
+  let distanceM = 0;
+  let durationS = 0;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const leg = await resolveDistance(points[i]!, points[i + 1]!);
+    distanceM += leg.distanceM;
+    durationS += leg.durationS;
+  }
+
+  return { distanceM, durationS };
+}

@@ -4,6 +4,7 @@ import {
   uuid,
   text,
   integer,
+  doublePrecision,
   boolean,
   timestamp,
   jsonb,
@@ -222,6 +223,22 @@ export const bookings = pgTable(
     toLocation: text('to_location').notNull(),
     fromCity: text('from_city'),
     toCity: text('to_city'),
+    // Places called at on the way out, in order. A hire that takes in Shimla on
+    // the way to Manali is one booking, not two, and the distance it is priced
+    // on is the sum of its legs - so these have to be stored, not just shown.
+    stops: text('stops').array().notNull().default(sql`ARRAY[]::text[]`),
+    // Where the vehicle actually goes. from_location is a place name a customer
+    // picked; this is the address a driver drives to, with the coordinates the
+    // map returned, so "Sector 44, Gurugram" does not become "Gurugram".
+    pickupAddress: text('pickup_address'),
+    pickupLat: doublePrecision('pickup_lat'),
+    pickupLng: doublePrecision('pickup_lng'),
+    // Where the round trip ends. Defaults to the pickup - almost everyone wants
+    // to be dropped where they were collected - but it is a separate column
+    // because some people do not.
+    dropAddress: text('drop_address'),
+    dropLat: doublePrecision('drop_lat'),
+    dropLng: doublePrecision('drop_lng'),
     distanceM: integer('distance_m').notNull(), // metres
     tripType: tripTypeEnum('trip_type').notNull().default('one_way'),
     pickupDatetime: timestamp('pickup_datetime', { withTimezone: true }).notNull(),

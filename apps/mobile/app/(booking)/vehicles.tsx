@@ -36,7 +36,7 @@ const FILTERS = [
 // the total is what decides which car someone takes. The rate stays underneath
 // it, because it is how the total can be checked.
 export default function Vehicles() {
-  const { from, to, setVehicle } = useBookingStore();
+  const { from, to, stops, setVehicle } = useBookingStore();
   const [filter, setFilter] = useState('all');
 
   const listing = useAsync(
@@ -44,9 +44,10 @@ export default function Vehicles() {
       listAvailableVehicles({
         from,
         to,
+        stops,
         ...(filter === 'all' ? {} : { category: filter as VehicleCategory }),
       }),
-    [from, to, filter],
+    [from, to, stops, filter],
   );
 
   const route = listing.data?.route;
@@ -56,7 +57,9 @@ export default function Vehicles() {
     <Screen ground={color.blue}>
       <PageHead
         title="Choose a vehicle"
-        subtitle={`${from} → ${to}${roundTrip ? `  ·  ${roundTrip} return` : ''}`}
+        subtitle={`${[from, ...stops, to].join(' → ')}${
+          roundTrip ? `  ·  ${roundTrip} return` : ''
+        }`}
         onBack={() => router.back()}
       />
 

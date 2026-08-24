@@ -40,6 +40,17 @@ const FALLBACK: Region = {
   longitudeDelta: START_DELTA,
 };
 
+/**
+ * What dropping a pin produces. The address is what a person reads; the
+ * coordinates are what a driver's navigation actually needs, and throwing them
+ * away turns "Plot 12, Sector 44" back into "Gurugram".
+ */
+export interface PickedPoint {
+  address: string;
+  lat: number;
+  lng: number;
+}
+
 export function MapPickerSheet({
   open,
   title,
@@ -49,11 +60,12 @@ export function MapPickerSheet({
   open: boolean;
   title: string;
   onClose: () => void;
-  onConfirm: (place: string) => void;
+  onConfirm: (picked: PickedPoint) => void;
 }) {
   const insets = useSafeAreaInsets();
   const map = useRef<MapView | null>(null);
   const [address, setAddress] = useState<string | null>(null);
+  const [point, setPoint] = useState<{ lat: number; lng: number } | null>(null);
   const [resolving, setResolving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -65,6 +77,7 @@ export function MapPickerSheet({
   useEffect(() => {
     if (!open) {
       setAddress(null);
+      setPoint(null);
       setDenied(false);
       return;
     }
@@ -78,6 +91,7 @@ export function MapPickerSheet({
   }, [open]);
 
   async function resolve(region: Region) {
+    setPoint({ lat: region.latitude, lng: region.longitude });
     const seq = ++latest.current;
     setResolving(true);
     try {
@@ -193,8 +207,8 @@ export function MapPickerSheet({
           ) : null}
           <Button
             label="Confirm this point"
-            onPress={() => address && onConfirm(address)}
-            disabled={!address || resolving}
+            onPress={() => address && point && onConfirm({ address, ...point })}
+            disabled={!address || !point || resolving}
             style={styles.confirm}
           />
         </View>
